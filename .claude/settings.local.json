@@ -7,7 +7,10 @@
       "Bash(.venv/Scripts/pip install:*)",
       "Bash(.venv/Scripts/pip freeze:*)",
       "Bash(.venv/Scripts/python -m ipykernel install --user --name osmnx-scraper --display-name \"OSMnx Scraper \\(Python 3.11\\)\")",
-      "Bash(.venv/Scripts/python -c ':*)"
+      "Bash(.venv/Scripts/python -c ':*)",
+      "Bash(ls \"E:\\\\IAAC Local GIT Repositories\\\\OSMnx-data-scraper\"/*.csv)",
+      "Bash(.venv/Scripts/python _build_nb.py)",
+      "Bash(del _build_nb.py)"
     ]
   }
 }
