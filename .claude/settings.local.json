@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(py -3.11 --version)",
+      "Bash(python3.11 --version)",
+      "Bash(py -3.11 -m venv .venv)",
+      "Bash(.venv/Scripts/pip install:*)",
+      "Bash(.venv/Scripts/pip freeze:*)",
+      "Bash(.venv/Scripts/python -m ipykernel install --user --name osmnx-scraper --display-name \"OSMnx Scraper \\(Python 3.11\\)\")",
+      "Bash(.venv/Scripts/python -c ':*)"
+    ]
+  }
+}
