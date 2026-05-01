@@ -16,9 +16,6 @@ dist/
 build/
 .eggs/
 
-# Output data files
-*.csv
-
 # Jupyter — track notebooks but ignore checkpoints
 .ipynb_checkpoints/
 
