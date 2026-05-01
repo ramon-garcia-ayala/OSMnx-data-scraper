@@ -1,8 +1,10 @@
 # Virtual environment
-.venv/
-venv/
-env/
-ENV/
+encoding/
+etc/
+include/
+lib/
+scripts/
+share/
 
 # Python cache
 __pycache__/
