@@ -12,7 +12,9 @@
       "Bash(.venv/Scripts/python _build_nb.py)",
       "Bash(del _build_nb.py)",
       "Bash(pip install:*)",
-      "Bash(pip show:*)"
+      "Bash(pip show:*)",
+      "Bash(jupyter nbconvert:*)",
+      "Bash(python -c \" import json nb = json.load\\(open\\('00_orchestrator.ipynb', encoding='utf-8'\\)\\) for cell in nb['cells']: print\\(''.join\\(cell['source'][:800]\\)\\) print\\('---'\\) \")"
     ]
   }
 }
