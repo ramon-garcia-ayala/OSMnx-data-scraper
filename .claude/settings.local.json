@@ -11,7 +11,8 @@
       "Bash(ls \"E:\\\\IAAC Local GIT Repositories\\\\OSMnx-data-scraper\"/*.csv)",
       "Bash(.venv/Scripts/python _build_nb.py)",
       "Bash(del _build_nb.py)",
-      "Bash(pip install:*)"
+      "Bash(pip install:*)",
+      "Bash(pip show:*)"
     ]
   }
 }
