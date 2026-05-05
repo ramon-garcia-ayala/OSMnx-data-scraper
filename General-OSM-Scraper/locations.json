@@ -1,0 +1,30 @@
+[
+    {
+        "name": "times_square",
+        "lat": 40.7589,
+        "lon": -73.9851,
+        "walk_minutes": 15.0,
+        "walk_speed_m_min": 80.0
+    },
+    {
+        "name": "upper__east_side",
+        "lat": 40.7735,
+        "lon": -73.9565,
+        "walk_minutes": 20.0,
+        "walk_speed_m_min": 80.0
+    },
+    {
+        "name": "harlem",
+        "lat": 40.8116,
+        "lon": -73.9465,
+        "walk_minutes": 20.0,
+        "walk_speed_m_min": 80.0
+    },
+    {
+        "name": "lower__east_side",
+        "lat": 40.7157,
+        "lon": -73.9863,
+        "walk_minutes": 20.0,
+        "walk_speed_m_min": 80.0
+    }
+]

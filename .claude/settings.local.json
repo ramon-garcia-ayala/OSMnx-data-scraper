@@ -14,7 +14,8 @@
       "Bash(pip install:*)",
       "Bash(pip show:*)",
       "Bash(jupyter nbconvert:*)",
-      "Bash(python -c \" import json nb = json.load\\(open\\('00_orchestrator.ipynb', encoding='utf-8'\\)\\) for cell in nb['cells']: print\\(''.join\\(cell['source'][:800]\\)\\) print\\('---'\\) \")"
+      "Bash(python -c \" import json nb = json.load\\(open\\('00_orchestrator.ipynb', encoding='utf-8'\\)\\) for cell in nb['cells']: print\\(''.join\\(cell['source'][:800]\\)\\) print\\('---'\\) \")",
+      "Bash(python -c ':*)"
     ]
   }
 }

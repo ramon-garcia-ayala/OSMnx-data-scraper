@@ -29,7 +29,7 @@ try {
 Write-Host ""
 Write-Host "[2/4] Creating virtual environment (.venv)..." -ForegroundColor Yellow
 if (Test-Path ".venv") {
-    Write-Host "      .venv already exists — skipping creation." -ForegroundColor DarkYellow
+    Write-Host "      .venv already exists - skipping creation." -ForegroundColor DarkYellow
 } else {
     & py -3.11 -m venv .venv
     Write-Host "      .venv created." -ForegroundColor Green
