@@ -82,6 +82,87 @@ function updateMinimap() {
 const COLORS = ["#007AFF", "#34C759", "#FF9500", "#AF52DE", "#FF3B30", "#5AC8FA", "#FF2D55", "#64D2FF"];
 function getColor(i) { return COLORS[i % COLORS.length]; }
 
+// ── context popup ────────────────────────────────────────
+let contextPopupLocId = null;
+
+function showContextPopup(locId, screenX, screenY) {
+  closeContextPopup();
+  contextPopupLocId = locId;
+
+  const loc = locations.find((l) => l.id === locId);
+  if (!loc) return;
+  const index = locations.indexOf(loc);
+  const color = getColor(index);
+  const radius = computeRadius(loc);
+
+  const popup = document.createElement("div");
+  popup.id = "ctx-popup";
+  popup.innerHTML = `
+    <div class="ctx-header">
+      <div style="display:flex; align-items:center; gap:8px;">
+        <div style="width:10px;height:10px;border-radius:50%;background:${color};flex-shrink:0;"></div>
+        <span class="ctx-name">${loc.name}</span>
+      </div>
+      <button class="ctx-close" onclick="closeContextPopup()">&#x2715;</button>
+    </div>
+    <div class="ctx-body">
+      <div class="ctx-row"><span class="ctx-label">Coordinates</span><span class="ctx-value mono">${loc.lat.toFixed(6)}, ${loc.lon.toFixed(6)}</span></div>
+      <div class="ctx-row"><span class="ctx-label">Walk radius</span><span class="ctx-value">${radius.toFixed(0)} m</span></div>
+      <div class="ctx-row"><span class="ctx-label">Walk time</span><span class="ctx-value">${loc.walk_minutes} min</span></div>
+      <div class="ctx-row"><span class="ctx-label">Walk speed</span><span class="ctx-value">${loc.walk_speed_m_min} m/min</span></div>
+      <div class="ctx-row" id="ctx-geocode-row">
+        <span class="ctx-label">Location</span>
+        <span class="ctx-value" id="ctx-geocode-val"><span class="ctx-loading">Looking up...</span></span>
+      </div>
+    </div>
+    <button class="ctx-delete-btn" onclick="removeLocationFromPopup(${locId})">Remove location</button>
+  `;
+
+  document.body.appendChild(popup);
+
+  // position: keep inside viewport
+  const pw = 260, ph = 220;
+  const vw = window.innerWidth, vh = window.innerHeight;
+  let x = screenX + 12, y = screenY - 10;
+  if (x + pw > vw - 8) x = screenX - pw - 12;
+  if (y + ph > vh - 8) y = vh - ph - 8;
+  if (y < 8) y = 8;
+  popup.style.left = x + "px";
+  popup.style.top  = y + "px";
+
+  // reverse geocode asynchronously
+  reverseGeocode(loc.lat, loc.lon).then((place) => {
+    const el = document.getElementById("ctx-geocode-val");
+    if (el) el.textContent = place || "—";
+  });
+}
+
+function closeContextPopup() {
+  const el = document.getElementById("ctx-popup");
+  if (el) el.remove();
+  contextPopupLocId = null;
+}
+
+function removeLocationFromPopup(id) {
+  closeContextPopup();
+  removeLocation(id);
+}
+
+async function reverseGeocode(lat, lon) {
+  try {
+    // reuse the backend proxy but with a reverse query
+    const res = await fetch(`/api/geocode?q=${lat},${lon}`);
+    const results = await res.json();
+    if (!results.length) return null;
+    // extract city + country from display_name (last two meaningful parts)
+    const parts = results[0].display_name.split(",").map((s) => s.trim());
+    // take country (last) + one before it, avoiding duplicates
+    const country = parts[parts.length - 1];
+    const region  = parts.length >= 3 ? parts[parts.length - 3] : parts[0];
+    return region !== country ? `${region}, ${country}` : country;
+  } catch { return null; }
+}
+
 // ── helpers ─────────────────────────────────────────────
 function computeRadius(loc) {
   return (loc.walk_minutes || 15) * (loc.walk_speed_m_min || 80);
@@ -145,6 +226,11 @@ function flyToResult(lat, lon, name) {
 
 document.addEventListener("click", (e) => {
   if (!e.target.closest("#search-box")) document.getElementById("search-results").style.display = "none";
+  if (!e.target.closest("#ctx-popup")) closeContextPopup();
+});
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") closeContextPopup();
 });
 
 // ── marker icon builder ─────────────────────────────────
@@ -187,11 +273,18 @@ function addLocation(lat, lon, name, walk_minutes, walk_speed_m_min) {
     loc.lat = Math.round(pos.lat * 1e6) / 1e6;
     loc.lon = Math.round(pos.lng * 1e6) / 1e6;
     circle.setLatLng(pos);
+    closeContextPopup();
     renderSidebar();
     setActive(id);
     updateMinimap();
   });
-  marker.on("click", () => setActive(id));
+  marker.on("click", () => { closeContextPopup(); setActive(id); });
+  marker.on("contextmenu", (e) => {
+    L.DomEvent.preventDefault(e);
+    const containerPoint = map.latLngToContainerPoint(e.latlng);
+    const mapRect = document.getElementById("map").getBoundingClientRect();
+    showContextPopup(id, mapRect.left + containerPoint.x, mapRect.top + containerPoint.y);
+  });
 
   loc.marker = marker;
   loc.circle = circle;
@@ -230,6 +323,16 @@ function setActive(id) {
   document.querySelectorAll(".location-card").forEach((card) =>
     card.classList.toggle("active", card.dataset.id == id)
   );
+  // highlight the active circle, dim the rest
+  locations.forEach((loc, i) => {
+    const isActive = loc.id === id;
+    loc.circle.setStyle({
+      fillOpacity: isActive ? 0.22 : 0.06,
+      weight:      isActive ? 2.5  : 1.5,
+      opacity:     isActive ? 1    : 0.55,
+    });
+    if (isActive) loc.circle.bringToFront();
+  });
 }
 
 // ── update field ────────────────────────────────────────
@@ -390,9 +493,12 @@ function escapeHtml(str) {
 
 // ── map click ───────────────────────────────────────────
 map.on("click", (e) => {
+  if (contextPopupLocId !== null) { closeContextPopup(); return; }
   addLocation(Math.round(e.latlng.lat * 1e6) / 1e6, Math.round(e.latlng.lng * 1e6) / 1e6);
   toast(`Location #${locations.length} added`);
 });
+
+map.on("contextmenu", () => { /* suppress browser menu on map */ });
 
 // ── API ─────────────────────────────────────────────────
 async function loadLocations() {

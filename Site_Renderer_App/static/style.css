@@ -701,6 +701,119 @@ html, body {
   50% { opacity: 0.55; }
 }
 
+/* ── context popup ──────────────────────────────────── */
+#ctx-popup {
+  position: fixed;
+  z-index: 2000;
+  width: 260px;
+  background: var(--bg-glass);
+  backdrop-filter: blur(40px) saturate(1.8);
+  -webkit-backdrop-filter: blur(40px) saturate(1.8);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  animation: popup-in 0.18s cubic-bezier(.4,0,.2,1);
+}
+
+@keyframes popup-in {
+  from { opacity: 0; transform: scale(0.94) translateY(4px); }
+  to   { opacity: 1; transform: scale(1)    translateY(0); }
+}
+
+.ctx-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 14px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.ctx-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: -0.2px;
+  word-break: break-all;
+}
+
+.ctx-close {
+  background: none;
+  border: none;
+  color: var(--text-tertiary);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+  line-height: 1;
+  flex-shrink: 0;
+  transition: all var(--transition);
+}
+
+.ctx-close:hover { color: var(--text-primary); background: var(--bg-hover); }
+
+.ctx-body {
+  padding: 10px 14px 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.ctx-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.ctx-label {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-weight: 500;
+  letter-spacing: 0.2px;
+  flex-shrink: 0;
+}
+
+.ctx-value {
+  font-size: 12px;
+  color: var(--text-primary);
+  font-weight: 500;
+  text-align: right;
+}
+
+.ctx-value.mono {
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.ctx-loading {
+  color: var(--text-tertiary);
+  font-style: italic;
+  font-size: 11px;
+}
+
+.ctx-delete-btn {
+  display: block;
+  width: calc(100% - 28px);
+  margin: 8px 14px 14px;
+  padding: 9px;
+  background: rgba(255, 59, 48, 0.1);
+  color: var(--red);
+  border: 1px solid rgba(255, 59, 48, 0.2);
+  border-radius: var(--radius-xs);
+  font-family: var(--font);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: center;
+  transition: all var(--transition);
+}
+
+.ctx-delete-btn:hover {
+  background: rgba(255, 59, 48, 0.18);
+  border-color: rgba(255, 59, 48, 0.4);
+}
+
 /* ── leaflet overrides ──────────────────────────────── */
 .leaflet-control-zoom a {
   background: var(--bg-glass) !important;
