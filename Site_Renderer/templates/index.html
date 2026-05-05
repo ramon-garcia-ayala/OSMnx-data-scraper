@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -11,21 +11,35 @@
 
   <!-- App styles -->
   <link rel="stylesheet" href="/static/style.css" />
+
+  <!-- Restore theme before paint -->
+  <script>
+    const saved = localStorage.getItem("theme");
+    if (saved) document.documentElement.setAttribute("data-theme", saved);
+  </script>
 </head>
 <body>
   <div id="app">
-    <!-- Sidebar -->
+    <!-- Full-bleed map -->
+    <div id="map"></div>
+
+    <!-- Floating sidebar -->
     <div id="sidebar">
       <div id="sidebar-header">
-        <h1>Site Renderer</h1>
-        <!-- City search -->
+        <div class="header-row">
+          <h1>Site Renderer</h1>
+          <button class="theme-toggle" onclick="toggleTheme()" title="Toggle dark / light mode">
+            <span class="toggle-icon moon">&#9790;</span>
+            <span class="toggle-icon sun">&#9728;</span>
+          </button>
+        </div>
         <div id="search-box">
           <input id="search-input" type="text" placeholder="Search city or address..." autocomplete="off" />
           <div id="search-results"></div>
         </div>
       </div>
 
-      <!-- Tabs -->
+      <!-- Segmented control -->
       <div id="tabs">
         <button class="tab active" data-tab="locations" onclick="switchTab('locations')">Locations</button>
         <button class="tab" data-tab="pipeline" onclick="switchTab('pipeline')">Pipeline</button>
@@ -38,30 +52,25 @@
 
       <!-- Tab: Pipeline -->
       <div id="tab-pipeline" class="tab-content">
-        <!-- Notebook checkboxes -->
         <div id="notebook-config">
-          <div class="section-title">Notebooks to run</div>
+          <div class="section-title">Notebooks</div>
           <div id="notebook-checkboxes"></div>
         </div>
-
-        <!-- Per-site pipeline status -->
         <div id="pipeline-viewer">
           <div class="section-title">Sites</div>
           <div id="pipeline-sites"></div>
         </div>
-
-        <!-- Pipeline log -->
         <div id="pipeline-log-section">
           <div class="section-title">Log</div>
           <div id="pipeline-log"></div>
         </div>
       </div>
 
-      <!-- Actions (always visible) -->
+      <!-- Actions -->
       <div id="sidebar-actions">
         <div class="btn-row">
           <button class="btn btn-secondary" onclick="saveLocations()">Save</button>
-          <button class="btn btn-secondary" onclick="clearAll()">Clear all</button>
+          <button class="btn btn-secondary" onclick="clearAll()">Clear All</button>
         </div>
         <div class="btn-row">
           <button id="btn-run-all" class="btn btn-run" onclick="runAll()">Run All Sites</button>
@@ -73,10 +82,7 @@
       </div>
     </div>
 
-    <!-- Map -->
-    <div id="map"></div>
-
-    <!-- Mini-map overlay -->
+    <!-- Floating mini-map -->
     <div id="minimap-container">
       <div id="minimap"></div>
     </div>
@@ -85,7 +91,6 @@
   <!-- Toast -->
   <div id="toast"></div>
 
-  <!-- App logic -->
   <script src="/static/app.js"></script>
 </body>
 </html>
