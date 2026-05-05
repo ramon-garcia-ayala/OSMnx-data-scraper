@@ -15,7 +15,10 @@
       "Bash(pip show:*)",
       "Bash(jupyter nbconvert:*)",
       "Bash(python -c \" import json nb = json.load\\(open\\('00_orchestrator.ipynb', encoding='utf-8'\\)\\) for cell in nb['cells']: print\\(''.join\\(cell['source'][:800]\\)\\) print\\('---'\\) \")",
-      "Bash(python -c ':*)"
+      "Bash(python -c ':*)",
+      "Bash(.venv/Scripts/python -c \"import geopandas; import matplotlib; import folium; import contextily\")",
+      "Bash(.venv/Scripts/python -c \"import geopandas; import matplotlib; import folium; print\\('geopandas, matplotlib, folium OK'\\)\")",
+      "Bash(.venv/Scripts/python -c \"import flask; print\\(flask.__version__\\)\")"
     ]
   }
 }
