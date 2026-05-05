@@ -7,7 +7,7 @@
         "walk_speed_m_min": 80.0
     },
     {
-        "name": "upper__east_side",
+        "name": "upper_east_side",
         "lat": 40.7735,
         "lon": -73.9565,
         "walk_minutes": 20.0,
@@ -21,7 +21,7 @@
         "walk_speed_m_min": 80.0
     },
     {
-        "name": "lower__east_side",
+        "name": "lower_east_side",
         "lat": 40.7157,
         "lon": -73.9863,
         "walk_minutes": 20.0,
