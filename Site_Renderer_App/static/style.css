@@ -723,6 +723,7 @@ html, body {
 .prog-lbl-running { color: #FFD60A; }
 .prog-lbl-failed  { color: var(--red); }
 .prog-lbl-pending { color: var(--text-tertiary); }
+.prog-lbl-eta     { display: block; color: var(--text-secondary); font-size: 11px; margin-top: 2px; }
 
 /* ── Plot generation progress ────────────────────────── */
 .plot-progress-track {

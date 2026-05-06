@@ -24,7 +24,14 @@
       "Bash(code --list-extensions)",
       "Bash(ls \"E:\\\\IAAC Local GIT Repositories\\\\OSMnx-data-scraper\\\\General-OSM-Scraper/csv/03_\"*)",
       "Read(//e/IAAC Local GIT Repositories/ramy/NYC_pluto_25v4_csv/**)",
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "Bash(.venv/Scripts/python.exe generate_icon.py)",
+      "Skill(update-config)",
+      "Bash(.venv/Scripts/python.exe generate_icon_options.py)",
+      "Bash(explorer E:\\\\IAAC Local GIT Repositories\\\\OSMnx-data-scraper\\\\icon_options:*)",
+      "Bash(start:*)",
+      "Bash(.venv/Scripts/python.exe generate_icon_apple.py)",
+      "Bash(.venv/Scripts/python.exe apply_icon_A.py)"
     ]
   }
 }

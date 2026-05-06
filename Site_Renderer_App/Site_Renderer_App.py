@@ -1056,6 +1056,17 @@ def serve_plot(filename):
     return send_file(PLOTS_BASE_DIR / "latest" / filename)
 
 
+@app.route("/api/delete-plots", methods=["POST"])
+def delete_plots():
+    plots_dir = PLOTS_BASE_DIR / "latest"
+    deleted = []
+    if plots_dir.exists():
+        for f in plots_dir.glob("*.png"):
+            f.unlink()
+            deleted.append(f.name)
+    return jsonify({"ok": True, "deleted": len(deleted)})
+
+
 @app.route("/api/combined-csv-info", methods=["GET"])
 def combined_csv_info():
     if not CSV_DIR.exists():

@@ -10,6 +10,7 @@ let notebookDefs = [];
 let enabledNotebooks = new Set(["01", "02", "03", "04", "05"]);
 let csvStatus = {};
 let pipelinePolling = false;
+let _pipelineStartTime = null;
 let osmTags = null;
 let osmPresets = {};
 let visibleColumns = null; // null = all columns visible
@@ -814,6 +815,25 @@ function showPipelineRunning(running) {
   document.querySelectorAll(".btn-run-site").forEach((b) => (b.disabled = running));
 }
 
+// ── time helpers ─────────────────────────────────────────
+function _fmtSecs(s) {
+  s = Math.round(s);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60), r = s % 60;
+  return r ? `${m}m ${r}s` : `${m}m`;
+}
+
+function _etaLabel(startTime, done, remaining) {
+  if (!startTime) return "";
+  const elapsed = (Date.now() - startTime) / 1000;
+  const elapsedStr = `${_fmtSecs(elapsed)} elapsed`;
+  if (done > 0 && remaining > 0) {
+    const eta = (elapsed / done) * remaining;
+    return `${elapsedStr} · ~${_fmtSecs(eta)} remaining`;
+  }
+  return elapsedStr;
+}
+
 // ── pipeline progress bar ────────────────────────────────
 function renderPipelineProgress(statusData) {
   const section = document.getElementById("pipeline-progress-section");
@@ -848,11 +868,13 @@ function renderPipelineProgress(statusData) {
   if (running) parts.push(`<span class="prog-lbl-running">${running} running</span>`);
   if (failed)  parts.push(`<span class="prog-lbl-failed">${failed} failed</span>`);
   if (pending) parts.push(`<span class="prog-lbl-pending">${pending} pending</span>`);
-  document.getElementById("pipeline-progress-label").innerHTML = parts.join(" · ");
+  const eta = statusData.running ? _etaLabel(_pipelineStartTime, done, pending) : "";
+  const etaLine = eta ? `<div class="prog-lbl-eta">${eta}</div>` : "";
+  document.getElementById("pipeline-progress-label").innerHTML = parts.join(" · ") + etaLine;
 }
 
 // ── polling ─────────────────────────────────────────────
-function startPolling() { if (pipelinePolling) return; pipelinePolling = true; pollPipeline(); }
+function startPolling() { if (pipelinePolling) return; pipelinePolling = true; _pipelineStartTime = Date.now(); pollPipeline(); }
 
 async function pollPipeline() {
   try {
@@ -1455,6 +1477,7 @@ function clearAll() {
 // ── ML Plots ─────────────────────────────────────────────
 let combinedCsvInfo  = null;
 let plotPolling      = false;
+let _plotStartTime   = null;
 let plotExcludeCols  = new Set(["median_income", "lanes"]);
 let plotSkipSet      = new Set(); // plot ids to skip (none skipped by default)
 
@@ -1503,7 +1526,8 @@ function renderCombinedSection() {
       <div class="combined-csv-actions">
         <button class="btn btn-secondary" style="flex:1" onclick="openCsvModal('combined')">Preview</button>
         ${hasPlots
-          ? `<button class="btn btn-secondary" onclick="openPlotsGalleryLatest()">View Plots (${plots.length})</button>`
+          ? `<button class="btn btn-secondary" onclick="openPlotsGalleryLatest()">View Plots (${plots.length})</button>
+             <button class="btn-delete-csv" onclick="deletePlots()" title="Delete all plots">&times;</button>`
           : ""}
         <button class="btn btn-run" onclick="openPlotsColumnSelector('${run_id}', '${file}')">
           ${hasPlots ? "Re-run Plots" : "Generate Plots"}
@@ -1593,6 +1617,7 @@ async function runPlots(csvFile, excludeCols, skipPlots = "") {
 function startPlotPolling() {
   if (plotPolling) return;
   plotPolling = true;
+  _plotStartTime = Date.now();
   _pollPlots();
 }
 
@@ -1642,13 +1667,34 @@ function _renderPlotProgress(data) {
     ? `<span class="plot-prog-chip spinning">generating…</span>`
     : "";
 
+  const totalExpected = AVAILABLE_PLOTS.length - plotSkipSet.size;
+  const fillPct = running ? Math.round(plots.length / Math.max(totalExpected, 1) * 100) : 100;
+  const etaStr  = running ? _etaLabel(_plotStartTime, plots.length, Math.max(totalExpected - plots.length, 0)) : "";
+
   el.style.display = "";
   el.innerHTML = `
     <div class="plot-progress-track">
-      <div class="plot-progress-fill" style="width:${running ? Math.max(plots.length * 9, 5) : 100}%"></div>
+      <div class="plot-progress-fill" style="width:${fillPct}%"></div>
     </div>
-    <div class="plot-progress-label">${plots.length} plot${plots.length !== 1 ? "s" : ""} saved${running ? "…" : " ✓"}</div>
+    <div class="plot-progress-label">
+      ${plots.length}${totalExpected ? `/${totalExpected}` : ""} plot${plots.length !== 1 ? "s" : ""} saved${running ? "…" : " ✓"}
+      ${etaStr ? `<div class="prog-lbl-eta">${etaStr}</div>` : ""}
+    </div>
     <div class="plot-prog-chips">${chips}${spinner}</div>`;
+}
+
+async function deletePlots() {
+  if (!confirm("Delete all generated plots?")) return;
+  try {
+    const res = await fetch("/api/delete-plots", { method: "POST" });
+    const data = await res.json();
+    if (data.ok) {
+      toast(`Deleted ${data.deleted} plot${data.deleted !== 1 ? "s" : ""}`);
+      await loadCombinedCsvInfo();
+    } else {
+      toast("Failed to delete plots", "error");
+    }
+  } catch { toast("Failed to delete plots", "error"); }
 }
 
 async function openPlotsGalleryLatest() {
