@@ -21,7 +21,10 @@
       "Bash(.venv/Scripts/python -c \"import flask; print\\(flask.__version__\\)\")",
       "Bash(powershell:*)",
       "Bash(.venv/Scripts/python -c \"import flask; print\\('flask ok'\\)\")",
-      "Bash(code --list-extensions)"
+      "Bash(code --list-extensions)",
+      "Bash(ls \"E:\\\\IAAC Local GIT Repositories\\\\OSMnx-data-scraper\\\\General-OSM-Scraper/csv/03_\"*)",
+      "Read(//e/IAAC Local GIT Repositories/ramy/NYC_pluto_25v4_csv/**)",
+      "Bash(python:*)"
     ]
   }
 }

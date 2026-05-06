@@ -90,6 +90,7 @@
       <!-- Actions -->
       <div class="panel-actions">
         <div class="btn-row">
+          <button id="btn-edit-mode" class="btn btn-edit-mode" onclick="toggleEditMode()">+ Add Sites</button>
           <button class="btn btn-secondary" onclick="saveLocations()">Save</button>
           <button class="btn btn-secondary" onclick="clearAll()">Clear All</button>
         </div>
@@ -133,6 +134,10 @@
         <label class="nb-checkbox" style="margin-top:8px;">
           <input type="checkbox" id="chk-auto-combine" checked />
           <span>Auto-combine CSVs on completion</span>
+        </label>
+        <label class="nb-checkbox" style="margin-top:4px;">
+          <input type="checkbox" id="chk-show-all-markers" onchange="toggleAllMarkers(this.checked)" />
+          <span>Show all site markers on map</span>
         </label>
         <div style="display:flex;gap:6px;margin-top:6px;">
           <button class="btn btn-secondary" onclick="openCsvModal('combined')" style="flex:1;">Preview Combined CSV</button>

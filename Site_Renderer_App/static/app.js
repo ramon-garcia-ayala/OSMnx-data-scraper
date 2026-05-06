@@ -210,9 +210,10 @@ async function reverseGeocode(lat, lon) {
     const results = await res.json();
     if (!results.length) return null;
     const parts = results[0].display_name.split(",").map((s) => s.trim());
-    const country = parts[parts.length - 1];
-    const region  = parts.length >= 3 ? parts[parts.length - 3] : parts[0];
-    return region !== country ? `${region}, ${country}` : country;
+    // return neighborhood/locality + city (first 2-3 meaningful parts)
+    if (parts.length >= 4) return `${parts[1]}, ${parts[2]}, ${parts[parts.length - 1]}`;
+    if (parts.length >= 2) return `${parts[0]}, ${parts[parts.length - 1]}`;
+    return parts[0];
   } catch { return null; }
 }
 
@@ -342,6 +343,10 @@ function addLocation(lat, lon, name, walk_minutes, walk_speed_m_min) {
     renderSidebar();
     setActive(id);
     updateMinimap();
+    reverseGeocode(loc.lat, loc.lon).then((place) => {
+      loc.neighborhood = place;
+      renderSidebar();
+    });
   });
 
   // LEFT-click for context popup (item #6)
@@ -355,11 +360,19 @@ function addLocation(lat, lon, name, walk_minutes, walk_speed_m_min) {
 
   loc.marker = marker;
   loc.circle = circle;
+  loc.neighborhood = null;
   locations.push(loc);
 
   renderSidebar();
   setActive(id);
   updateMinimap();
+
+  // fetch neighborhood info
+  reverseGeocode(lat, lon).then((place) => {
+    loc.neighborhood = place;
+    renderSidebar();
+  });
+
   return loc;
 }
 
@@ -488,6 +501,7 @@ function renderSidebar() {
         <button class="btn-delete" onclick="event.stopPropagation(); removeLocation(${loc.id})" title="Remove">&times;</button>
       </div>
       <div class="coord-display">${loc.lat.toFixed(6)}, ${loc.lon.toFixed(6)}</div>
+      ${loc.neighborhood ? `<div class="neighborhood-display">${escapeHtml(loc.neighborhood)}</div>` : ""}
       <div class="field-row">
         <div class="field-group">
           <label>Walk minutes ${isActive && locations.length > 1 ? `<a class="apply-all-link" onclick="event.stopPropagation(); applyToAll('walk_minutes')">Apply to all</a>` : ""}</label>
@@ -506,6 +520,7 @@ function renderSidebar() {
     </div>`;
   }).join("");
 
+  renderPipelineSites();
 }
 
 // ── pipeline tab ────────────────────────────────────────
@@ -598,9 +613,20 @@ function renderPipelineLog(logLines) {
   container.scrollTop = container.scrollHeight;
 }
 
+// ── edit mode ───────────────────────────────────────────
+let editMode = false;
+
+function toggleEditMode() {
+  editMode = !editMode;
+  const btn = document.getElementById("btn-edit-mode");
+  btn.classList.toggle("active", editMode);
+  document.getElementById("map").style.cursor = editMode ? "crosshair" : "";
+}
+
 // ── map click ───────────────────────────────────────────
 map.on("click", (e) => {
   if (contextPopupLocId !== null) { closeContextPopup(); return; }
+  if (!editMode) return;
   addLocation(Math.round(e.latlng.lat * 1e6) / 1e6, Math.round(e.latlng.lng * 1e6) / 1e6);
   toast(`Location #${locations.length} added`);
 });
@@ -748,7 +774,8 @@ async function pollPipeline() {
           if (chk && chk.checked) combineCSVs();
         }
       }
-      loadCsvStatus();
+      await loadCsvStatus();
+      renderPipelineSites(data);
     }
   } catch { pipelinePolling = false; setTimeout(pollPipeline, 5000); }
 }
@@ -833,18 +860,23 @@ function _showCsvOverlay(siteName, meta, rows) {
   }).join("");
 
   const labelIdx = columns.indexOf("label");
-  const bodyRows = rows.map((row) =>
-    `<tr>${columns.map((c, ci) => {
+  const latIdx = columns.indexOf("lat");
+  const lonIdx = columns.indexOf("lon");
+  const bodyRows = rows.map((row) => {
+    const hasCoords = row["lat"] != null && row["lon"] != null;
+    const clickAttr = hasCoords
+      ? ` class="csv-row-clickable" onclick="csvRowNavigate(${row["lat"]}, ${row["lon"]}, '${escapeHtml(String(row["name"] || ""))}')"`
+      : "";
+    return `<tr${clickAttr}>${columns.map((c, ci) => {
       const v = row[c];
       if (v === null || v === undefined) return `<td><span class="null-val">\u2014</span></td>`;
       const str = escapeHtml(String(v));
-      // color-code the label column
       if (ci === labelIdx && v) {
         return `<td class="label-${v}">${str}</td>`;
       }
       return `<td>${str}</td>`;
-    }).join("")}</tr>`
-  ).join("");
+    }).join("")}</tr>`;
+  }).join("");
 
   overlay.innerHTML = `
     <div class="csv-modal">
@@ -888,6 +920,68 @@ async function csvPageNav(dir) {
   await _fetchAndRenderCsvPage(csvModalMeta.site, next);
 }
 
+function csvRowNavigate(lat, lon, name) {
+  // show inline confirmation bar at bottom of modal
+  const existing = document.querySelector(".csv-nav-bar");
+  if (existing) existing.remove();
+
+  const bar = document.createElement("div");
+  bar.className = "csv-nav-bar";
+  bar.innerHTML = `
+    <span>Go to <strong>${escapeHtml(name || "this location")}</strong>?</span>
+    <div style="display:flex;gap:6px;">
+      <button class="btn-nav-go" onclick="this.closest('.csv-nav-bar').remove(); _doCsvNavigate(${lat}, ${lon}, '${escapeHtml(name || "")}')">Go</button>
+      <button class="btn-nav-cancel" onclick="this.closest('.csv-nav-bar').remove()">Cancel</button>
+    </div>
+  `;
+  document.querySelector(".csv-modal").appendChild(bar);
+  return;
+}
+
+function _doCsvNavigate(lat, lon, name) {
+  // capture site before closing modal
+  const modalSite = csvModalMeta ? csvModalMeta.site : null;
+  closeCsvModal();
+
+  // enable all markers so the target is visible
+  const chk = document.getElementById("chk-show-all-markers");
+  if (chk && !chk.checked) {
+    chk.checked = true;
+    toggleAllMarkers(true);
+  }
+
+  map.flyTo([lat, lon], 19, { duration: 1 });
+  if (name) toast(`Navigated to ${name.substring(0, 40)}`);
+
+  // find the site origin for this marker to compute route
+  let originSite = null;
+  if (modalSite && modalSite !== "combined") {
+    originSite = locations.find((l) => l.name === modalSite);
+  }
+  if (!originSite) {
+    // find closest site
+    let minDist = Infinity;
+    locations.forEach((l) => {
+      const d = Math.abs(l.lat - lat) + Math.abs(l.lon - lon);
+      if (d < minDist) { minDist = d; originSite = l; }
+    });
+  }
+
+  // highlight with pulsing circle and compute route
+  setTimeout(() => {
+    const pulse = L.circleMarker([lat, lon], {
+      radius: 18,
+      fillColor: "#0A84FF",
+      fillOpacity: 0.3,
+      weight: 2,
+      color: "#0A84FF",
+      className: "csv-marker-pulse",
+    }).addTo(map);
+    setTimeout(() => map.removeLayer(pulse), 3000);
+
+  }, 1200);
+}
+
 function csvGoToPage() {
   if (!csvModalMeta) return;
   const input = document.getElementById("csv-page-input");
@@ -909,10 +1003,21 @@ document.addEventListener("keydown", (e) => {
     if (e.key === "ArrowRight") csvPageNav(1);
     if (e.key === "ArrowLeft")  csvPageNav(-1);
   }
+  if ((e.ctrlKey || e.metaKey) && e.key === "s") {
+    e.preventDefault();
+    saveLocations();
+  }
 });
 
 
 // ── amenity markers on map (item #5) ────────────────────
+let showAllMarkers = false;
+
+function toggleAllMarkers(checked) {
+  showAllMarkers = checked;
+  loadAmenityMarkers();
+}
+
 async function loadAmenityMarkers() {
   // clear existing
   if (amenityClusterGroup) {
@@ -924,53 +1029,55 @@ async function loadAmenityMarkers() {
     currentRouteLayer = null;
   }
 
-  const active = locations.find((l) => l.id === activeId);
-  if (!active) return;
+  // determine which sites to show (only when toggle is enabled)
+  if (!showAllMarkers) return;
+  const sitesToLoad = locations.filter((l) => csvStatus[l.name]);
 
-  // check if CSV exists for this site
-  if (!csvStatus[active.name]) return;
+  if (!sitesToLoad.length) return;
 
-  try {
-    const res = await fetch(`/api/csv-markers/${encodeURIComponent(active.name)}`);
-    if (!res.ok) return;
-    const data = await res.json();
-    if (!data.markers || !data.markers.length) return;
+  amenityClusterGroup = L.markerClusterGroup({
+    maxClusterRadius: 50,
+    spiderfyOnMaxZoom: true,
+    showCoverageOnHover: false,
+    zoomToBoundsOnClick: true,
+  });
 
-    amenityClusterGroup = L.markerClusterGroup({
-      maxClusterRadius: 50,
-      spiderfyOnMaxZoom: true,
-      showCoverageOnHover: false,
-      zoomToBoundsOnClick: true,
-    });
+  await Promise.all(sitesToLoad.map(async (site) => {
+    try {
+      const res = await fetch(`/api/csv-markers/${encodeURIComponent(site.name)}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      if (!data.markers || !data.markers.length) return;
 
-    data.markers.forEach((m) => {
-      if (m.lat == null || m.lon == null) return;
-      const color = LABEL_COLORS[m.label] || "#888";
-      const icon = L.divIcon({
-        className: "amenity-marker-wrap",
-        html: `<div class="amenity-marker" style="background:${color};width:12px;height:12px;"></div>`,
-        iconSize: [12, 12],
-        iconAnchor: [6, 6],
+      data.markers.forEach((m) => {
+        if (m.lat == null || m.lon == null) return;
+        const color = LABEL_COLORS[m.label] || "#888";
+        const icon = L.divIcon({
+          className: "amenity-marker-wrap",
+          html: `<div class="amenity-marker" style="background:${color};width:12px;height:12px;"></div>`,
+          iconSize: [12, 12],
+          iconAnchor: [6, 6],
+        });
+
+        const marker = L.marker([m.lat, m.lon], { icon });
+
+        const popupLines = [];
+        if (m.name) popupLines.push(`<div class="popup-name">${escapeHtml(m.name)}</div>`);
+        popupLines.push(`<div class="popup-row"><span>Site</span><span>${escapeHtml(site.name)}</span></div>`);
+        if (m.label) popupLines.push(`<div class="popup-row"><span>Label</span><span class="label-${m.label}">${m.label}</span></div>`);
+        if (m.distance_m != null) popupLines.push(`<div class="popup-row"><span>Distance</span><span>${Math.round(m.distance_m)} m</span></div>`);
+        if (m.osm_id) popupLines.push(`<div class="popup-row"><span>OSM ID</span><span>${m.osm_id}</span></div>`);
+        popupLines.push(`<button class="popup-route-btn" onclick="computeRoute(${site.lat}, ${site.lon}, ${m.lat}, ${m.lon})">Show walking route</button>`);
+
+        marker.bindPopup(`<div class="amenity-popup">${popupLines.join("")}</div>`, { maxWidth: 250 });
+        amenityClusterGroup.addLayer(marker);
       });
+    } catch (err) {
+      console.error(`Failed to load markers for ${site.name}:`, err);
+    }
+  }));
 
-      const marker = L.marker([m.lat, m.lon], { icon });
-
-      // build popup content
-      const popupLines = [];
-      if (m.name) popupLines.push(`<div class="popup-name">${escapeHtml(m.name)}</div>`);
-      if (m.label) popupLines.push(`<div class="popup-row"><span>Label</span><span class="label-${m.label}">${m.label}</span></div>`);
-      if (m.distance_m != null) popupLines.push(`<div class="popup-row"><span>Distance</span><span>${Math.round(m.distance_m)} m</span></div>`);
-      if (m.osm_id) popupLines.push(`<div class="popup-row"><span>OSM ID</span><span>${m.osm_id}</span></div>`);
-      popupLines.push(`<button class="popup-route-btn" onclick="computeRoute(${active.lat}, ${active.lon}, ${m.lat}, ${m.lon})">Show walking route</button>`);
-
-      marker.bindPopup(`<div class="amenity-popup">${popupLines.join("")}</div>`, { maxWidth: 250 });
-      amenityClusterGroup.addLayer(marker);
-    });
-
-    map.addLayer(amenityClusterGroup);
-  } catch (err) {
-    console.error("Failed to load amenity markers:", err);
-  }
+  map.addLayer(amenityClusterGroup);
 }
 
 // ── walking route computation (item #5) ─────────────────
@@ -981,7 +1088,10 @@ async function computeRoute(originLat, originLon, destLat, destLon) {
     currentRouteLayer = null;
   }
 
-  toast("Computing walking route...");
+  // show persistent loading toast with pulse
+  const el = document.getElementById("toast");
+  el.textContent = "Computing walking route...";
+  el.className = "show loading-pulse";
 
   try {
     const res = await fetch("/api/walking-route", {
@@ -990,6 +1100,7 @@ async function computeRoute(originLat, originLon, destLat, destLon) {
       body: JSON.stringify({ origin_lat: originLat, origin_lon: originLon, dest_lat: destLat, dest_lon: destLon }),
     });
     const data = await res.json();
+    el.className = "";
     if (data.error) { toast(data.error, "error"); return; }
 
     currentRouteLayer = L.polyline(data.route, {
@@ -998,10 +1109,14 @@ async function computeRoute(originLat, originLon, destLat, destLon) {
       opacity: 0.8,
       dashArray: "8 6",
       lineCap: "round",
+      pane: "overlayPane",
     }).addTo(map);
+    currentRouteLayer.bringToFront();
+    map.fitBounds(currentRouteLayer.getBounds().pad(0.15));
 
     toast(`Route: ${Math.round(data.length_m)} m`);
   } catch (err) {
+    el.className = "";
     console.error(err);
     toast("Failed to compute route", "error");
   }

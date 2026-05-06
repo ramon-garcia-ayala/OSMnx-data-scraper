@@ -430,9 +430,15 @@ html, body {
 .coord-display {
   font-size: 11px;
   color: var(--text-tertiary);
-  margin-bottom: 10px;
+  margin-bottom: 2px;
   font-family: var(--mono);
   letter-spacing: 0.3px;
+}
+.neighborhood-display {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-bottom: 10px;
+  font-weight: 500;
 }
 
 .field-group { margin-bottom: 8px; }
@@ -740,6 +746,8 @@ html, body {
 .btn-secondary { background: var(--bg-input); color: var(--text-primary); }
 .btn-run       { background: var(--green); color: white; }
 .btn-cancel    { background: var(--red); color: white; }
+.btn-edit-mode { background: var(--bg-input); color: var(--text-primary); transition: all 0.2s; }
+.btn-edit-mode.active { background: var(--accent); color: white; box-shadow: 0 0 10px rgba(10,132,255,0.4); }
 
 .btn-row { display: flex; gap: 6px; }
 .btn-row .btn { flex: 1; }
@@ -790,6 +798,11 @@ html, body {
 #toast.show { transform: translateX(-50%) translateY(0); }
 #toast.success { border-color: var(--green); }
 #toast.error   { border-color: var(--red); }
+#toast.loading-pulse {
+  transform: translateX(-50%) translateY(0);
+  border-color: var(--accent);
+  animation: pulse 1.2s ease-in-out infinite;
+}
 
 /* ── scrollbar ──────────────────────────────────────── */
 ::-webkit-scrollbar { width: 5px; }
@@ -983,6 +996,48 @@ html, body {
 }
 
 .csv-table tbody tr:hover { background: var(--bg-hover); }
+.csv-row-clickable { cursor: pointer; }
+.csv-row-clickable:active { background: var(--accent-dim, rgba(10,132,255,0.15)); }
+
+.csv-nav-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  background: var(--bg-elevated);
+  border-top: 1px solid var(--border);
+  font-size: 13px;
+  color: var(--text-primary);
+}
+.btn-nav-go {
+  padding: 5px 14px;
+  background: var(--accent);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: var(--font);
+}
+.btn-nav-cancel {
+  padding: 5px 14px;
+  background: var(--bg-input);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  font-family: var(--font);
+}
+
+.csv-marker-pulse {
+  animation: marker-pulse 0.8s ease-in-out infinite;
+}
+@keyframes marker-pulse {
+  0%, 100% { opacity: 1; stroke-width: 2; }
+  50% { opacity: 0.3; stroke-width: 4; }
+}
 
 .null-val { color: var(--text-tertiary); }
 

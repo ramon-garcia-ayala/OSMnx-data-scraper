@@ -292,8 +292,14 @@ def csv_markers(site_name):
     cols = ["osm_id", "name", "lat", "lon", "label", "distance_m"]
     cols = [c for c in cols if c in df.columns]
     df = df[cols]
-    df = df.where(df.notna(), None)
-    return jsonify({"site": site_name, "markers": df.to_dict(orient="records")})
+    # drop rows without coordinates
+    df = df.dropna(subset=["lat", "lon"])
+    records = df.to_dict(orient="records")
+    for row in records:
+        for k, v in row.items():
+            if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
+                row[k] = None
+    return jsonify({"site": site_name, "markers": records})
 
 
 # ── API: CSV delete ──────────────────────────────────────
@@ -487,19 +493,17 @@ def walking_route():
     d_lat, d_lon = body["dest_lat"], body["dest_lon"]
 
     try:
-        dist = max(600, _haversine(o_lat, o_lon, d_lat, d_lon) * 1.5)
-        c_lat = (o_lat + d_lat) / 2
-        c_lon = (o_lon + d_lon) / 2
-
-        # use cache keyed by rounded center + dist
-        cache_key = (round(c_lat, 3), round(c_lon, 3), round(dist, -2))
+        # Cache key: origin rounded to 2 decimals (~1km grid) — one graph per site
+        cache_key = (round(o_lat, 2), round(o_lon, 2))
         with _graph_cache_lock:
             G = _graph_cache.get(cache_key)
 
         if G is None:
-            G = ox.graph_from_point((c_lat, c_lon), dist=dist, network_type="walk")
+            # Load a graph covering the site's walk radius (use origin as center)
+            dist = max(1500, _haversine(o_lat, o_lon, d_lat, d_lon) * 1.8)
+            G = ox.graph_from_point((o_lat, o_lon), dist=dist, network_type="walk")
             with _graph_cache_lock:
-                if len(_graph_cache) > 20:
+                if len(_graph_cache) > 10:
                     _graph_cache.pop(next(iter(_graph_cache)))
                 _graph_cache[cache_key] = G
 
