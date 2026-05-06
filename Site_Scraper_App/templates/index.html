@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Site Renderer</title>
+  <title>Site Scraper</title>
   <link rel="icon" type="image/x-icon" href="/static/favicon.ico" />
   <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon.png" />
 
@@ -40,7 +40,7 @@
     <div id="left-panel" class="floating-panel panel-left">
       <div class="panel-header">
         <div class="header-row">
-          <h1>Site Renderer</h1>
+          <h1>Site Scraper</h1>
           <div style="display:flex;gap:6px;align-items:center;">
             <button class="theme-toggle" onclick="toggleTheme()" title="Toggle dark / light mode">
               <span class="toggle-icon moon">&#9790;</span>
@@ -98,6 +98,9 @@
         </div>
       </div>
     </div>
+
+    <!-- Tutorial launcher — floats to the right of the left panel -->
+    <button id="btn-tutorial" onclick="startTutorial()" title="Start guided tour">Tutorial</button>
 
     <!-- Left panel re-open button -->
     <button id="left-panel-open" class="panel-reopen panel-reopen-left" onclick="togglePanel('left')" style="display:none;">

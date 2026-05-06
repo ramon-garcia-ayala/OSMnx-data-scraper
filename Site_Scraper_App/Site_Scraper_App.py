@@ -1,5 +1,5 @@
 """
-Site Renderer – Flask backend
+Site Scraper – Flask backend
 Serves the interactive Leaflet map and exposes API endpoints for:
   - GET/POST /api/locations        → read/write locations.json
   - POST     /api/run-site         → run pipeline for one site

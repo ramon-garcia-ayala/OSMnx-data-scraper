@@ -2,11 +2,11 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "Launch Site Renderer",
+      "label": "Launch Site Scraper",
       "type": "shell",
-      "command": "${workspaceFolder}\\launch_site_renderer.bat",
+      "command": "${workspaceFolder}\\launch_site_scraper.bat",
       "windows": {
-        "command": "${workspaceFolder}\\launch_site_renderer.bat"
+        "command": "${workspaceFolder}\\launch_site_scraper.bat"
       },
       "group": {
         "kind": "build",
@@ -20,10 +20,10 @@
       "problemMatcher": []
     },
     {
-      "label": "Launch Site Renderer (terminal)",
+      "label": "Launch Site Scraper (terminal)",
       "type": "shell",
       "command": "python",
-      "args": ["Site_Renderer_App/Site_Renderer_App.py"],
+      "args": ["Site_Scraper_App/Site_Scraper_App.py"],
       "options": {
         "cwd": "${workspaceFolder}"
       },

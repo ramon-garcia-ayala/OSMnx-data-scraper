@@ -1,4 +1,4 @@
-/* ── Site Renderer ──────────────────────────────────────
+/* ── Site Scraper ────────────────────────────────────────
    Interactive map for configuring & running the pipeline.
    ──────────────────────────────────────────────────────── */
 
@@ -139,6 +139,7 @@ function togglePanel(side) {
   const btn   = document.getElementById(`${side}-panel-open`);
   const collapsed = panel.classList.toggle("collapsed");
   btn.style.display = collapsed ? "" : "none";
+  document.getElementById("app").classList.toggle(`${side}-panel-collapsed`, collapsed);
 }
 
 // ── context popup (now LEFT-click) ──────────────────────
@@ -1125,6 +1126,11 @@ function closeCsvModal() {
 }
 
 document.addEventListener("keydown", (e) => {
+  if (_tutActive) {
+    if (e.key === "Escape")     { endTutorial(); return; }
+    if (e.key === "ArrowRight") { _tutNav(1);    return; }
+    if (e.key === "ArrowLeft")  { _tutNav(-1);   return; }
+  }
   if (e.key === "Escape") { closeCsvModal(); closeContextPopup(); }
   if (document.getElementById("csv-modal-overlay")) {
     if (e.key === "ArrowRight") csvPageNav(1);
@@ -1403,7 +1409,7 @@ async function exportSession() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `site_renderer_session_${new Date().toISOString().slice(0,10)}.json`;
+    a.download = `site_scraper_session_${new Date().toISOString().slice(0,10)}.json`;
     a.click();
     URL.revokeObjectURL(url);
     toast("Session exported");
@@ -1736,6 +1742,322 @@ function openPlotsGallery(runId, plots) {
       <div class="plots-gallery-grid">${cards}</div>
     </div>`;
   document.body.appendChild(overlay);
+}
+
+// ── Tutorial ─────────────────────────────────────────────
+const TUTORIAL_STEPS = [
+  {
+    target: null,
+    title: "Welcome to Site Scraper",
+    body: "This guided tour walks you through every feature of the app. Use the arrows — or your keyboard ← → — to navigate. Press Esc to exit at any time.",
+    position: "center",
+  },
+  {
+    target: "#search-box",
+    title: "Search",
+    body: "Type any city, address, or landmark to find it on the map. Click a result to fly there instantly.",
+    position: "bottom",
+  },
+  {
+    target: "#btn-edit-mode",
+    title: "Add Sites",
+    body: "Click '+ Add Sites' to enter edit mode, then click anywhere on the map to place a marker. Each marker is a location you want to analyse.",
+    position: "top",
+  },
+  {
+    target: "#location-list",
+    title: "Location List",
+    body: "All saved sites appear here. Click a site to zoom to it. Edit its name, walk radius, or walk speed inline. Right-click for more options.",
+    position: "right",
+    ensureTab: { panel: "left", tab: "locations" },
+  },
+  {
+    target: "#left-tabs",
+    title: "Panel Tabs",
+    body: "Switch between Locations, OSM Tags, and Settings. OSM Tags lets you customise which categories are searched around each site.",
+    position: "bottom",
+    ensureTab: { panel: "left", tab: "locations" },
+  },
+  {
+    target: "#tab-settings",
+    title: "Settings",
+    body: "Choose which CSV columns appear in map marker popups, and import or export your entire session as a JSON file.",
+    position: "right",
+    ensureTab: { panel: "left", tab: "settings" },
+  },
+  {
+    target: ".panel-actions",
+    title: "Quick Actions",
+    body: "Save your sites to disk (or press Ctrl+S), toggle between adding and viewing mode, or clear everything with Clear All.",
+    position: "top",
+    ensureTab: { panel: "left", tab: "locations" },
+  },
+  {
+    target: ".theme-toggle",
+    title: "Dark / Light Theme",
+    body: "Toggle between dark and light mode at any time. Your preference is saved and restored on next visit.",
+    position: "bottom",
+  },
+  {
+    target: "#minimap-container",
+    title: "Minimap",
+    body: "A live overview of all your sites. Updates in real time as you add or move markers.",
+    position: "bottom",
+  },
+  {
+    target: ".leaflet-top.leaflet-right",
+    title: "Zoom Controls",
+    body: "Use + and − to zoom in and out. The ⊡ button fits all your site markers in view instantly.",
+    position: "left",
+  },
+  {
+    target: "#notebook-checkboxes",
+    title: "Select Notebooks",
+    body: "Choose which analysis steps to run: Identifiers, Y-Target, Morphological, Synergistic Proximity, Socioeconomic, and Joker (median income). Notebooks needing PLUTO data are only available for NYC.",
+    position: "left",
+    ensureTab: { panel: "right" },
+  },
+  {
+    target: "#pipeline-viewer",
+    title: "Sites Queue",
+    body: "Shows each site and the status of every step — pending, running, done, or failed. Click a site row to run just that one site.",
+    position: "left",
+    ensureTab: { panel: "right" },
+  },
+  {
+    target: "#btn-run-all",
+    title: "Run All Sites",
+    body: "Starts the full pipeline for every saved site in sequence. Use the Cancel button to stop at any time.",
+    position: "top",
+    ensureTab: { panel: "right" },
+  },
+  {
+    target: "#pipeline-progress-section",
+    title: "Progress Bar",
+    body: "Tracks every pipeline step in real time — green for done, yellow for running, red for failed — with elapsed time and an estimated time remaining.",
+    position: "top",
+    ensureTab: { panel: "right" },
+  },
+  {
+    target: "#pipeline-log-section",
+    title: "Live Log",
+    body: "Live output from each notebook. Errors are highlighted in red. Use 'Copy Error' to grab the full traceback for debugging.",
+    position: "top",
+    ensureTab: { panel: "right" },
+  },
+  {
+    target: "#combined-plots-section",
+    title: "Combined CSV & ML Plots",
+    body: "After the pipeline finishes, combine all site CSVs into one file. Then generate ML plots — classification analysis with confusion matrices, pairplots, and a correlation heatmap. Choose which plots to generate before running.",
+    position: "left",
+    ensureTab: { panel: "right" },
+  },
+  {
+    target: null,
+    title: "You're all set! 🎉",
+    body: "Start by searching for a location or clicking '+ Add Sites'. Run the pipeline when ready, then explore your results with CSV preview and ML plots. Happy analysing!",
+    position: "center",
+  },
+];
+
+let _tutStep   = 0;
+let _tutActive = false;
+
+function startTutorial() {
+  if (_tutActive) endTutorial();
+  _tutActive = true;
+  _tutStep   = 0;
+  _renderTutStep();
+}
+
+function endTutorial() {
+  _tutActive = false;
+  _tutCleanup();
+}
+
+function _tutNav(dir) {
+  const next = _tutStep + dir;
+  if (next < 0 || next >= TUTORIAL_STEPS.length) { endTutorial(); return; }
+  _tutStep = next;
+  _renderTutStep();
+}
+
+let _tutTempShown = []; // elements temporarily force-shown for the current step
+
+function _tutCleanup() {
+  // Restore any elements we temporarily showed
+  _tutTempShown.forEach(({ el, prev }) => { el.style.display = prev; });
+  _tutTempShown = [];
+  document.getElementById("tut-backdrop")?.remove();
+  document.getElementById("tut-spotlight")?.remove();
+  document.getElementById("tut-tooltip")?.remove();
+}
+
+function _tutForceShow(selector) {
+  const el = document.querySelector(selector);
+  if (!el) return null;
+  const r = el.getBoundingClientRect();
+  // If element is hidden (zero size), temporarily show it
+  if (r.width === 0 || r.height === 0) {
+    const prev = el.style.display;
+    el.style.display = "block";
+    _tutTempShown.push({ el, prev });
+  }
+  return el;
+}
+
+function _tutEnsureVisible(step) {
+  if (!step.ensureTab) return;
+  const { panel, tab } = step.ensureTab;
+  if (panel === "left") {
+    const lp = document.getElementById("left-panel");
+    if (lp?.classList.contains("collapsed")) togglePanel("left");
+    if (tab) switchLeftTab(tab);
+  } else if (panel === "right") {
+    const rp = document.getElementById("right-panel");
+    if (rp?.classList.contains("collapsed")) togglePanel("right");
+  }
+}
+
+function _renderTutStep() {
+  _tutCleanup();
+  if (!_tutActive) return;
+
+  const step   = TUTORIAL_STEPS[_tutStep];
+  const isLast = _tutStep === TUTORIAL_STEPS.length - 1;
+
+  _tutEnsureVisible(step);
+
+  // ── backdrop ──────────────────────────────────────────
+  const backdrop = document.createElement("div");
+  backdrop.id = "tut-backdrop";
+  backdrop.addEventListener("click", (e) => { if (e.target === backdrop) endTutorial(); });
+  document.body.appendChild(backdrop);
+
+  let spotRect = null;
+
+  if (step.target) {
+    const el = _tutForceShow(step.target) || document.querySelector(step.target);
+    if (el) {
+      el.scrollIntoView({ block: "nearest", inline: "nearest" });
+      const r   = el.getBoundingClientRect();
+      const PAD = 8;
+      const spot = document.createElement("div");
+      spot.id = "tut-spotlight";
+      spot.style.top    = (r.top    - PAD) + "px";
+      spot.style.left   = (r.left   - PAD) + "px";
+      spot.style.width  = (r.width  + PAD * 2) + "px";
+      spot.style.height = (r.height + PAD * 2) + "px";
+      document.body.appendChild(spot);
+      spotRect = {
+        top: r.top - PAD, left: r.left - PAD,
+        width: r.width + PAD*2, height: r.height + PAD*2,
+        bottom: r.bottom + PAD, right: r.right + PAD,
+      };
+    }
+  } else {
+    backdrop.classList.add("tut-no-spotlight");
+  }
+
+  // ── tooltip ────────────────────────────────────────────
+  const tooltip = document.createElement("div");
+  tooltip.id = "tut-tooltip";
+
+  const dots = TUTORIAL_STEPS.map((_, i) =>
+    `<span class="tut-dot${i === _tutStep ? " active" : ""}"></span>`
+  ).join("");
+
+  tooltip.innerHTML = `
+    <button class="tut-close" onclick="endTutorial()" title="Exit tutorial">&#x2715;</button>
+    <div class="tut-step-badge">${_tutStep + 1} / ${TUTORIAL_STEPS.length}</div>
+    <div class="tut-title">${step.title}</div>
+    <div class="tut-body">${step.body}</div>
+    <div class="tut-nav">
+      <button class="tut-btn tut-btn-back" onclick="_tutNav(-1)"${_tutStep === 0 ? " disabled" : ""}>&#8592; Back</button>
+      <div class="tut-dots">${dots}</div>
+      <button class="tut-btn tut-btn-next" onclick="${isLast ? "endTutorial()" : "_tutNav(1)"}">
+        ${isLast ? "Done &#10003;" : "Next &#8594;"}
+      </button>
+    </div>
+    <div class="tut-arrow" id="tut-arrow"></div>`;
+  document.body.appendChild(tooltip);
+
+  // Position after paint so offsetHeight is known
+  requestAnimationFrame(() => _positionTutTooltip(tooltip, spotRect, step.position));
+}
+
+const _TUT_W   = 300;
+const _TUT_GAP = 16;
+
+function _positionTutTooltip(tooltip, spotRect, preferred) {
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const th = tooltip.offsetHeight;
+  const M  = 12; // viewport margin
+  const arrowEl = document.getElementById("tut-arrow");
+
+  if (!spotRect || preferred === "center") {
+    tooltip.style.left = Math.round(vw / 2 - _TUT_W / 2) + "px";
+    tooltip.style.top  = Math.round(vh / 2 - th / 2) + "px";
+    if (arrowEl) arrowEl.className = "tut-arrow";
+    return;
+  }
+
+  const sr = spotRect;
+  const fits = {
+    top:    sr.top    - M >= th + _TUT_GAP,
+    bottom: vh - sr.bottom - M >= th + _TUT_GAP,
+    left:   sr.left   - M >= _TUT_W + _TUT_GAP,
+    right:  vw - sr.right - M >= _TUT_W + _TUT_GAP,
+  };
+  const order = [preferred, "bottom", "right", "top", "left"];
+  const pos   = order.find(p => fits[p]) || "bottom";
+
+  let tx, ty, arrowSide;
+
+  if (pos === "bottom") {
+    tx = sr.left + sr.width / 2 - _TUT_W / 2;
+    ty = sr.bottom + _TUT_GAP;
+    arrowSide = "top";
+  } else if (pos === "top") {
+    tx = sr.left + sr.width / 2 - _TUT_W / 2;
+    ty = sr.top - _TUT_GAP - th;
+    arrowSide = "bottom";
+  } else if (pos === "right") {
+    tx = sr.right + _TUT_GAP;
+    ty = sr.top + sr.height / 2 - th / 2;
+    arrowSide = "left";
+  } else {
+    tx = sr.left - _TUT_GAP - _TUT_W;
+    ty = sr.top + sr.height / 2 - th / 2;
+    arrowSide = "right";
+  }
+
+  tx = Math.max(M, Math.min(vw - _TUT_W - M, tx));
+  ty = Math.max(M, Math.min(vh - th - M, ty));
+
+  tooltip.style.left = Math.round(tx) + "px";
+  tooltip.style.top  = Math.round(ty) + "px";
+
+  // Arrow offset — point toward target center
+  if (arrowEl) {
+    arrowEl.className = "tut-arrow tut-arrow-" + arrowSide;
+    if (arrowSide === "top" || arrowSide === "bottom") {
+      const targetCx  = sr.left + sr.width / 2;
+      const offset    = Math.round(Math.max(20, Math.min(_TUT_W - 20, targetCx - tx - 8)));
+      arrowEl.style.left   = offset + "px";
+      arrowEl.style.top    = "";
+      arrowEl.style.bottom = "";
+      arrowEl.style.right  = "";
+    } else {
+      const targetCy  = sr.top + sr.height / 2;
+      const offset    = Math.round(Math.max(16, Math.min(th - 16, targetCy - ty - 8)));
+      arrowEl.style.top    = offset + "px";
+      arrowEl.style.left   = "";
+      arrowEl.style.bottom = "";
+      arrowEl.style.right  = "";
+    }
+  }
 }
 
 // ── init ────────────────────────────────────────────────
