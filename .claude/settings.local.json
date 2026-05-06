@@ -18,7 +18,9 @@
       "Bash(python -c ':*)",
       "Bash(.venv/Scripts/python -c \"import geopandas; import matplotlib; import folium; import contextily\")",
       "Bash(.venv/Scripts/python -c \"import geopandas; import matplotlib; import folium; print\\('geopandas, matplotlib, folium OK'\\)\")",
-      "Bash(.venv/Scripts/python -c \"import flask; print\\(flask.__version__\\)\")"
+      "Bash(.venv/Scripts/python -c \"import flask; print\\(flask.__version__\\)\")",
+      "Bash(powershell:*)",
+      "Bash(.venv/Scripts/python -c \"import flask; print\\('flask ok'\\)\")"
     ]
   }
 }

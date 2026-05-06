@@ -10,6 +10,25 @@ let notebookDefs = [];
 let enabledNotebooks = new Set(["01", "02", "03", "04", "05"]);
 let csvStatus = {};
 let pipelinePolling = false;
+let osmTags = null;
+let osmPresets = {};
+let visibleColumns = null; // null = all columns visible
+let amenityClusterGroup = null;
+let currentRouteLayer = null;
+let csvSortCol = null;
+let csvSortDir = "asc";
+
+// ── label colors (matching CSS) ─────────────────────────
+const LABEL_COLORS = {
+  food_drink:            "#FF9F0A",
+  retail:                "#0A84FF",
+  personal_care:         "#FF375F",
+  health:                "#FF453A",
+  finance:               "#30D158",
+  hospitality:           "#BF5AF2",
+  office_professional:   "#64D2FF",
+  leisure_entertainment: "#FFD60A",
+};
 
 // ── theme ───────────────────────────────────────────────
 function currentTheme() {
@@ -33,6 +52,15 @@ function toggleTheme() {
   localStorage.setItem("theme", next);
   swapTiles(next);
 }
+
+// Auto-detect OS theme changes
+window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", (e) => {
+  if (!localStorage.getItem("theme")) {
+    const t = e.matches ? "dark" : "light";
+    document.documentElement.setAttribute("data-theme", t);
+    swapTiles(t);
+  }
+});
 
 function swapTiles(theme) {
   if (mainTileLayer) mainTileLayer.setUrl(TILE_URLS[theme]);
@@ -82,7 +110,15 @@ function updateMinimap() {
 const COLORS = ["#007AFF", "#34C759", "#FF9500", "#AF52DE", "#FF3B30", "#5AC8FA", "#FF2D55", "#64D2FF"];
 function getColor(i) { return COLORS[i % COLORS.length]; }
 
-// ── context popup ────────────────────────────────────────
+// ── panel collapse/expand ───────────────────────────────
+function togglePanel(side) {
+  const panel = document.getElementById(`${side}-panel`);
+  const btn   = document.getElementById(`${side}-panel-open`);
+  const collapsed = panel.classList.toggle("collapsed");
+  btn.style.display = collapsed ? "" : "none";
+}
+
+// ── context popup (now LEFT-click) ──────────────────────
 let contextPopupLocId = null;
 
 function showContextPopup(locId, screenX, screenY) {
@@ -120,7 +156,6 @@ function showContextPopup(locId, screenX, screenY) {
 
   document.body.appendChild(popup);
 
-  // position: keep inside viewport
   const pw = 260, ph = 220;
   const vw = window.innerWidth, vh = window.innerHeight;
   let x = screenX + 12, y = screenY - 10;
@@ -130,10 +165,9 @@ function showContextPopup(locId, screenX, screenY) {
   popup.style.left = x + "px";
   popup.style.top  = y + "px";
 
-  // reverse geocode asynchronously
   reverseGeocode(loc.lat, loc.lon).then((place) => {
     const el = document.getElementById("ctx-geocode-val");
-    if (el) el.textContent = place || "—";
+    if (el) el.textContent = place || "\u2014";
   });
 }
 
@@ -150,13 +184,10 @@ function removeLocationFromPopup(id) {
 
 async function reverseGeocode(lat, lon) {
   try {
-    // reuse the backend proxy but with a reverse query
     const res = await fetch(`/api/geocode?q=${lat},${lon}`);
     const results = await res.json();
     if (!results.length) return null;
-    // extract city + country from display_name (last two meaningful parts)
     const parts = results[0].display_name.split(",").map((s) => s.trim());
-    // take country (last) + one before it, avoiding duplicates
     const country = parts[parts.length - 1];
     const region  = parts.length >= 3 ? parts[parts.length - 3] : parts[0];
     return region !== country ? `${region}, ${country}` : country;
@@ -168,6 +199,16 @@ function computeRadius(loc) {
   return (loc.walk_minutes || 15) * (loc.walk_speed_m_min || 80);
 }
 
+function csvParamsMatch(loc, params) {
+  if (!params) return false;
+  return (
+    params.lat              === loc.lat &&
+    params.lon              === loc.lon &&
+    params.walk_minutes     === loc.walk_minutes &&
+    params.walk_speed_m_min === loc.walk_speed_m_min
+  );
+}
+
 function toast(msg, type = "success") {
   const el = document.getElementById("toast");
   el.textContent = msg;
@@ -175,15 +216,21 @@ function toast(msg, type = "success") {
   setTimeout(() => { el.className = ""; }, 3000);
 }
 
-// ── tabs ────────────────────────────────────────────────
-function switchTab(name) {
-  document.querySelectorAll(".tab").forEach((t) =>
+function escapeHtml(str) {
+  return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+// ── left tabs ───────────────────────────────────────────
+function switchLeftTab(name) {
+  document.querySelectorAll("#left-tabs .tab").forEach((t) =>
     t.classList.toggle("active", t.dataset.tab === name)
   );
-  document.querySelectorAll(".tab-content").forEach((c) =>
-    c.classList.toggle("active", c.id === `tab-${name}`)
-  );
-  if (name === "pipeline") renderPipelineTab();
+  ["locations", "osm-tags", "settings"].forEach((id) => {
+    const el = document.getElementById(`tab-${id}`);
+    if (el) el.classList.toggle("active", id === name);
+  });
+  if (name === "osm-tags") renderOsmTagsEditor();
+  if (name === "settings") renderColumnSelector();
 }
 
 // ── city search ─────────────────────────────────────────
@@ -226,11 +273,7 @@ function flyToResult(lat, lon, name) {
 
 document.addEventListener("click", (e) => {
   if (!e.target.closest("#search-box")) document.getElementById("search-results").style.display = "none";
-  if (!e.target.closest("#ctx-popup")) closeContextPopup();
-});
-
-document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") closeContextPopup();
+  if (!e.target.closest("#ctx-popup") && !e.target.closest(".custom-marker")) closeContextPopup();
 });
 
 // ── marker icon builder ─────────────────────────────────
@@ -278,12 +321,14 @@ function addLocation(lat, lon, name, walk_minutes, walk_speed_m_min) {
     setActive(id);
     updateMinimap();
   });
-  marker.on("click", () => { closeContextPopup(); setActive(id); });
-  marker.on("contextmenu", (e) => {
-    L.DomEvent.preventDefault(e);
+
+  // LEFT-click for context popup (item #6)
+  marker.on("click", (e) => {
+    L.DomEvent.stopPropagation(e);
     const containerPoint = map.latLngToContainerPoint(e.latlng);
     const mapRect = document.getElementById("map").getBoundingClientRect();
     showContextPopup(id, mapRect.left + containerPoint.x, mapRect.top + containerPoint.y);
+    setActive(id);
   });
 
   loc.marker = marker;
@@ -307,6 +352,7 @@ function removeLocation(id) {
   rebuildMarkerIcons();
   renderSidebar();
   updateMinimap();
+  loadAmenityMarkers();
 }
 
 function rebuildMarkerIcons() {
@@ -323,8 +369,7 @@ function setActive(id) {
   document.querySelectorAll(".location-card").forEach((card) =>
     card.classList.toggle("active", card.dataset.id == id)
   );
-  // highlight the active circle, dim the rest
-  locations.forEach((loc, i) => {
+  locations.forEach((loc) => {
     const isActive = loc.id === id;
     loc.circle.setStyle({
       fillOpacity: isActive ? 0.22 : 0.06,
@@ -333,6 +378,8 @@ function setActive(id) {
     });
     if (isActive) loc.circle.bringToFront();
   });
+  // show amenity markers for active site only
+  loadAmenityMarkers();
 }
 
 // ── update field ────────────────────────────────────────
@@ -366,6 +413,21 @@ function updateField(id, field, value) {
   }
 }
 
+// ── bulk apply to all (item #3) ─────────────────────────
+function applyToAll(field) {
+  const active = locations.find((l) => l.id === activeId);
+  if (!active || locations.length < 2) return;
+  const val = active[field];
+  locations.forEach((loc) => {
+    loc[field] = val;
+    if (field === "walk_minutes" || field === "walk_speed_m_min") {
+      loc.circle.setRadius(computeRadius(loc));
+    }
+  });
+  renderSidebar();
+  toast(`Applied ${field.replace(/_/g, " ")} = ${val} to all sites`);
+}
+
 // ── render sidebar ──────────────────────────────────────
 function renderSidebar() {
   const list = document.getElementById("location-list");
@@ -383,8 +445,9 @@ function renderSidebar() {
   list.innerHTML = locations.map((loc, i) => {
     const color = getColor(i);
     const radius = computeRadius(loc);
+    const isActive = loc.id === activeId;
     return `
-    <div class="location-card ${loc.id === activeId ? "active" : ""}" data-id="${loc.id}" onclick="setActive(${loc.id})">
+    <div class="location-card ${isActive ? "active" : ""}" data-id="${loc.id}" onclick="setActive(${loc.id})">
       <div class="location-card-header">
         <div style="display:flex; align-items:center; gap:10px;">
           <div class="location-index" style="background:${color}">${i + 1}</div>
@@ -397,13 +460,13 @@ function renderSidebar() {
       <div class="coord-display">${loc.lat.toFixed(6)}, ${loc.lon.toFixed(6)}</div>
       <div class="field-row">
         <div class="field-group">
-          <label>Walk minutes</label>
+          <label>Walk minutes ${isActive && locations.length > 1 ? `<a class="apply-all-link" onclick="event.stopPropagation(); applyToAll('walk_minutes')">Apply to all</a>` : ""}</label>
           <input type="number" min="1" step="1" value="${loc.walk_minutes}"
             onchange="updateField(${loc.id}, 'walk_minutes', this.value)"
             onclick="event.stopPropagation()" />
         </div>
         <div class="field-group">
-          <label>Speed (m/min)</label>
+          <label>Speed (m/min) ${isActive && locations.length > 1 ? `<a class="apply-all-link" onclick="event.stopPropagation(); applyToAll('walk_speed_m_min')">Apply to all</a>` : ""}</label>
           <input type="number" min="1" step="5" value="${loc.walk_speed_m_min}"
             onchange="updateField(${loc.id}, 'walk_speed_m_min', this.value)"
             onclick="event.stopPropagation()" />
@@ -429,11 +492,15 @@ function renderNotebookCheckboxes() {
   container.innerHTML = notebookDefs.map((nb) => {
     const checked = enabledNotebooks.has(nb.id) ? "checked" : "";
     const cls = nb.id === "06" ? " joker" : "";
+    const plutoTag = nb.needs_pluto
+      ? `<span class="pluto-tag" title="${nb.pluto_available ? 'PLUTO data found' : 'PLUTO not found — will be skipped'}">${nb.pluto_available ? 'NYC' : 'NYC only'}</span>`
+      : "";
     return `
     <label class="nb-checkbox${cls}">
       <input type="checkbox" ${checked} onchange="toggleNotebook('${nb.id}', this.checked)" />
       <span class="nb-id">${nb.id}</span>
       <span>${nb.label}</span>
+      ${plutoTag}
     </label>`;
   }).join("");
 }
@@ -453,26 +520,40 @@ function renderPipelineSites(statusData) {
   container.innerHTML = locations.map((loc, i) => {
     const color = getColor(i);
     const siteStatus = sites[loc.name] || {};
-    const hasCsv = !!csvStatus[loc.name];
+    const csvInfo = csvStatus[loc.name];
+    const hasCsv  = !!csvInfo;
+    const paramsMatch = hasCsv && csvParamsMatch(loc, csvInfo.params);
+
+    const effectiveStatus = (nb) => {
+      if (siteStatus[nb.id]) return siteStatus[nb.id];
+      if (paramsMatch) return "done";
+      return "pending";
+    };
 
     const steps = notebookDefs.map((nb) => {
-      const st = siteStatus[nb.id] || "pending";
+      const st = effectiveStatus(nb);
       return `<div class="nb-step ${st}" title="${nb.label}: ${st}">${nb.id}</div>`;
     }).join("");
 
     const isRunning = Object.values(siteStatus).some((s) => s === "running");
     const btnDisabled = statusData?.running ? "disabled" : "";
+    const csvBadge = hasCsv
+      ? `<span class="csv-badge has-csv" title="${paramsMatch ? "Up to date" : "Params changed"}">${paramsMatch ? "\u2713 CSV" : "\u26A0 CSV"}</span>`
+      : `<span class="csv-badge no-csv">no CSV</span>`;
 
     return `
     <div class="pipeline-site-card">
       <div class="pipeline-site-header">
         <div class="pipeline-site-name" style="color:${color}">
           ${loc.name}
-          <span class="csv-badge ${hasCsv ? "has-csv" : "no-csv"}">${hasCsv ? "CSV" : "no CSV"}</span>
+          ${csvBadge}
         </div>
-        <button class="btn-run-site" ${btnDisabled} onclick="runSite('${loc.name}')">
-          ${isRunning ? "Running..." : "Run"}
-        </button>
+        <div style="display:flex;gap:5px;align-items:center;">
+          ${hasCsv ? `<button class="btn-view-csv" onclick="openCsvModal('${loc.name}')" title="Open CSV">&#8599;</button>` : ""}
+          <button class="btn-run-site" ${btnDisabled} onclick="runSite('${loc.name}')">
+            ${isRunning ? "Running..." : "Run"}
+          </button>
+        </div>
       </div>
       <div class="nb-steps">${steps}</div>
     </div>`;
@@ -485,10 +566,6 @@ function renderPipelineLog(logLines) {
   if (!lines.length) { container.innerHTML = '<span style="color:var(--text-tertiary)">No log output yet</span>'; return; }
   container.innerHTML = lines.map((l) => `<div class="log-line">${escapeHtml(l)}</div>`).join("");
   container.scrollTop = container.scrollHeight;
-}
-
-function escapeHtml(str) {
-  return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 // ── map click ───────────────────────────────────────────
@@ -524,6 +601,16 @@ async function loadCsvStatus() {
   catch (err) { console.error("Failed to load CSV status:", err); }
 }
 
+async function loadOsmTags() {
+  try { const res = await fetch("/api/osm-tags"); osmTags = await res.json(); }
+  catch (err) { console.error("Failed to load OSM tags:", err); }
+}
+
+async function loadOsmPresets() {
+  try { const res = await fetch("/api/osm-tag-presets"); osmPresets = await res.json(); }
+  catch (err) { console.error("Failed to load OSM presets:", err); }
+}
+
 async function saveLocations() {
   const payload = locations.map((loc) => ({
     name: loc.name, lat: loc.lat, lon: loc.lon,
@@ -546,7 +633,7 @@ async function runSite(siteName) {
     const data = await res.json();
     if (data.error) { toast(data.error, "error"); return; }
     toast(`Pipeline started for ${siteName}`);
-    showPipelineRunning(true); switchTab("pipeline"); startPolling();
+    showPipelineRunning(true); startPolling();
   } catch { toast("Failed to start pipeline", "error"); }
 }
 
@@ -559,7 +646,7 @@ async function runAll() {
     const res = await fetch("/api/run-all", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ notebooks }) });
     const data = await res.json();
     if (data.error) { toast(data.error, "error"); return; }
-    toast(data.message); showPipelineRunning(true); switchTab("pipeline"); startPolling();
+    toast(data.message); showPipelineRunning(true); startPolling();
   } catch { toast("Failed to start pipeline", "error"); }
 }
 
@@ -620,27 +707,482 @@ function updateCombineButton() {
   btn.disabled = !locations.every((loc) => csvStatus[loc.name]);
 }
 
+// ── CSV modal (server-side pagination + sorting + label colors) ──
+let csvModalMeta = null;
+let csvCurrentPage = 0;
+
+async function openCsvModal(siteName) {
+  csvCurrentPage = 0;
+  csvModalMeta = null;
+  csvSortCol = null;
+  csvSortDir = "asc";
+  _showCsvOverlay(siteName, null, null);
+  await _fetchAndRenderCsvPage(siteName, 0);
+}
+
+async function _fetchAndRenderCsvPage(siteName, page) {
+  try {
+    let url = `/api/csv-site/${encodeURIComponent(siteName)}?page=${page}&size=50`;
+    if (csvSortCol) url += `&sort=${encodeURIComponent(csvSortCol)}&dir=${csvSortDir}`;
+    const res = await fetch(url);
+    if (!res.ok) { toast("Failed to load CSV", "error"); closeCsvModal(); return; }
+    const data = await res.json();
+    if (data.error) { toast(data.error, "error"); closeCsvModal(); return; }
+    csvModalMeta = data;
+    csvCurrentPage = data.page;
+    _showCsvOverlay(siteName, data, data.data);
+  } catch (err) {
+    console.error(err);
+    toast("Failed to load CSV", "error");
+    closeCsvModal();
+  }
+}
+
+function csvSort(col) {
+  if (csvSortCol === col) {
+    csvSortDir = csvSortDir === "asc" ? "desc" : "asc";
+  } else {
+    csvSortCol = col;
+    csvSortDir = "asc";
+  }
+  csvCurrentPage = 0;
+  if (csvModalMeta) {
+    _showCsvOverlay(csvModalMeta.site, null, null);
+    _fetchAndRenderCsvPage(csvModalMeta.site, 0);
+  }
+}
+
+function _showCsvOverlay(siteName, meta, rows) {
+  const old = document.getElementById("csv-modal-overlay");
+  if (old) old.remove();
+
+  const overlay = document.createElement("div");
+  overlay.id = "csv-modal-overlay";
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) closeCsvModal(); });
+
+  if (!meta) {
+    overlay.innerHTML = `
+      <div class="csv-modal">
+        <div class="csv-modal-header">
+          <span class="csv-modal-title">${escapeHtml(siteName)}</span>
+          <button class="ctx-close" onclick="closeCsvModal()">&#x2715;</button>
+        </div>
+        <div class="csv-modal-loading">Loading\u2026</div>
+      </div>`;
+    document.body.appendChild(overlay);
+    return;
+  }
+
+  const { file, rows: totalRows, total_pages, page, columns } = meta;
+  const rowStart = page * 50 + 1;
+  const rowEnd   = Math.min((page + 1) * 50, totalRows);
+
+  const headerCells = columns.map((c) => {
+    const isSort = csvSortCol === c;
+    const arrow = isSort
+      ? `<span class="sort-arrow active">${csvSortDir === "asc" ? "\u25B2" : "\u25BC"}</span>`
+      : `<span class="sort-arrow">\u25B2</span>`;
+    return `<th onclick="csvSort('${escapeHtml(c)}')">${escapeHtml(String(c))} ${arrow}</th>`;
+  }).join("");
+
+  const labelIdx = columns.indexOf("label");
+  const bodyRows = rows.map((row) =>
+    `<tr>${columns.map((c, ci) => {
+      const v = row[c];
+      if (v === null || v === undefined) return `<td><span class="null-val">\u2014</span></td>`;
+      const str = escapeHtml(String(v));
+      // color-code the label column
+      if (ci === labelIdx && v) {
+        return `<td class="label-${v}">${str}</td>`;
+      }
+      return `<td>${str}</td>`;
+    }).join("")}</tr>`
+  ).join("");
+
+  overlay.innerHTML = `
+    <div class="csv-modal">
+      <div class="csv-modal-header">
+        <div>
+          <span class="csv-modal-title">${escapeHtml(siteName)}</span>
+          <span class="csv-modal-meta">${totalRows.toLocaleString()} rows &middot; ${columns.length} columns &middot; ${escapeHtml(file)}</span>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <a class="btn-csv-download" href="/api/csv-site/${encodeURIComponent(siteName)}/download" download="${escapeHtml(file)}">Download CSV</a>
+          <button class="ctx-close" onclick="closeCsvModal()">&#x2715;</button>
+        </div>
+      </div>
+      <div class="csv-table-wrap">
+        <table class="csv-table">
+          <thead><tr>${headerCells}</tr></thead>
+          <tbody>${bodyRows}</tbody>
+        </table>
+      </div>
+      <div class="csv-modal-footer">
+        <span class="csv-page-info">Page ${page + 1} of ${total_pages} &nbsp;&middot;&nbsp; rows ${rowStart}\u2013${rowEnd}</span>
+        <div style="display:flex;gap:6px;">
+          <button class="btn-page" onclick="csvPageNav(-1)" ${page === 0 ? "disabled" : ""}>&larr; Prev</button>
+          <button class="btn-page" onclick="csvPageNav(1)"  ${page >= total_pages - 1 ? "disabled" : ""}>Next &rarr;</button>
+        </div>
+      </div>
+    </div>`;
+
+  document.body.appendChild(overlay);
+}
+
+async function csvPageNav(dir) {
+  if (!csvModalMeta) return;
+  const next = csvCurrentPage + dir;
+  if (next < 0 || next >= csvModalMeta.total_pages) return;
+  _showCsvOverlay(csvModalMeta.site, null, null);
+  await _fetchAndRenderCsvPage(csvModalMeta.site, next);
+}
+
+function closeCsvModal() {
+  const el = document.getElementById("csv-modal-overlay");
+  if (el) el.remove();
+  csvModalMeta = null;
+}
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") { closeCsvModal(); closeContextPopup(); }
+  if (document.getElementById("csv-modal-overlay")) {
+    if (e.key === "ArrowRight") csvPageNav(1);
+    if (e.key === "ArrowLeft")  csvPageNav(-1);
+  }
+});
+
+// ── amenity markers on map (item #5) ────────────────────
+async function loadAmenityMarkers() {
+  // clear existing
+  if (amenityClusterGroup) {
+    map.removeLayer(amenityClusterGroup);
+    amenityClusterGroup = null;
+  }
+  if (currentRouteLayer) {
+    map.removeLayer(currentRouteLayer);
+    currentRouteLayer = null;
+  }
+
+  const active = locations.find((l) => l.id === activeId);
+  if (!active) return;
+
+  // check if CSV exists for this site
+  if (!csvStatus[active.name]) return;
+
+  try {
+    const res = await fetch(`/api/csv-markers/${encodeURIComponent(active.name)}`);
+    if (!res.ok) return;
+    const data = await res.json();
+    if (!data.markers || !data.markers.length) return;
+
+    amenityClusterGroup = L.markerClusterGroup({
+      maxClusterRadius: 50,
+      spiderfyOnMaxZoom: true,
+      showCoverageOnHover: false,
+      zoomToBoundsOnClick: true,
+    });
+
+    data.markers.forEach((m) => {
+      if (m.lat == null || m.lon == null) return;
+      const color = LABEL_COLORS[m.label] || "#888";
+      const icon = L.divIcon({
+        className: "amenity-marker-wrap",
+        html: `<div class="amenity-marker" style="background:${color};width:12px;height:12px;"></div>`,
+        iconSize: [12, 12],
+        iconAnchor: [6, 6],
+      });
+
+      const marker = L.marker([m.lat, m.lon], { icon });
+
+      // build popup content
+      const popupLines = [];
+      if (m.name) popupLines.push(`<div class="popup-name">${escapeHtml(m.name)}</div>`);
+      if (m.label) popupLines.push(`<div class="popup-row"><span>Label</span><span class="label-${m.label}">${m.label}</span></div>`);
+      if (m.distance_m != null) popupLines.push(`<div class="popup-row"><span>Distance</span><span>${Math.round(m.distance_m)} m</span></div>`);
+      if (m.osm_id) popupLines.push(`<div class="popup-row"><span>OSM ID</span><span>${m.osm_id}</span></div>`);
+      popupLines.push(`<button class="popup-route-btn" onclick="computeRoute(${active.lat}, ${active.lon}, ${m.lat}, ${m.lon})">Show walking route</button>`);
+
+      marker.bindPopup(`<div class="amenity-popup">${popupLines.join("")}</div>`, { maxWidth: 250 });
+      amenityClusterGroup.addLayer(marker);
+    });
+
+    map.addLayer(amenityClusterGroup);
+  } catch (err) {
+    console.error("Failed to load amenity markers:", err);
+  }
+}
+
+// ── walking route computation (item #5) ─────────────────
+async function computeRoute(originLat, originLon, destLat, destLon) {
+  // remove previous route
+  if (currentRouteLayer) {
+    map.removeLayer(currentRouteLayer);
+    currentRouteLayer = null;
+  }
+
+  toast("Computing walking route...");
+
+  try {
+    const res = await fetch("/api/walking-route", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ origin_lat: originLat, origin_lon: originLon, dest_lat: destLat, dest_lon: destLon }),
+    });
+    const data = await res.json();
+    if (data.error) { toast(data.error, "error"); return; }
+
+    currentRouteLayer = L.polyline(data.route, {
+      color: getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#0A84FF",
+      weight: 4,
+      opacity: 0.8,
+      dashArray: "8 6",
+      lineCap: "round",
+    }).addTo(map);
+
+    toast(`Route: ${Math.round(data.length_m)} m`);
+  } catch (err) {
+    console.error(err);
+    toast("Failed to compute route", "error");
+  }
+}
+
+// ── OSM tag editor (item #9) ────────────────────────────
+function renderOsmTagsEditor() {
+  if (!osmTags) return;
+  const container = document.getElementById("osm-tags-editor");
+
+  const sections = [
+    { key: "commercial_tags", title: "Commercial Tags" },
+    { key: "amenity_exclude", title: "Amenity Exclude" },
+    { key: "leisure_exclude", title: "Leisure Exclude" },
+    { key: "tourism_exclude", title: "Tourism Exclude" },
+    { key: "shop_exclude", title: "Shop Exclude" },
+  ];
+
+  let html = "";
+  sections.forEach((s) => {
+    const tags = osmTags[s.key] || [];
+    const chips = tags.map((t) =>
+      `<span class="tag-chip">${escapeHtml(t)}<span class="tag-remove" onclick="removeTag('${s.key}', '${escapeHtml(t)}')">&times;</span></span>`
+    ).join("");
+    html += `
+    <div class="tag-section">
+      <div class="tag-section-title">${s.title}</div>
+      <div class="tag-list">${chips || '<span style="color:var(--text-tertiary);font-size:11px">None</span>'}</div>
+      <div class="tag-add-row">
+        <input class="tag-add-input" id="tag-input-${s.key}" placeholder="Add tag..." onkeydown="if(event.key==='Enter')addTag('${s.key}')" />
+        <button class="tag-add-btn" onclick="addTag('${s.key}')">+</button>
+      </div>
+    </div>`;
+  });
+
+  // preset controls
+  const presetOptions = Object.keys(osmPresets).map((n) =>
+    `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`
+  ).join("");
+
+  html += `
+  <div class="tag-section">
+    <div class="tag-section-title">Presets</div>
+    <div class="tag-preset-row">
+      <select class="tag-preset-select" id="tag-preset-select">
+        <option value="">Load preset...</option>
+        ${presetOptions}
+      </select>
+      <button class="tag-add-btn" onclick="loadTagPreset()">Load</button>
+    </div>
+    <div class="tag-preset-row">
+      <input class="tag-add-input" id="tag-preset-name" placeholder="Preset name..." />
+      <button class="tag-add-btn" onclick="saveTagPreset()">Save</button>
+    </div>
+  </div>
+  <div style="padding:4px 0;">
+    <button class="btn btn-primary" onclick="saveOsmTags()" style="width:100%">Save Tag Configuration</button>
+  </div>`;
+
+  container.innerHTML = html;
+}
+
+function addTag(key) {
+  const input = document.getElementById(`tag-input-${key}`);
+  const val = input.value.trim().toLowerCase();
+  if (!val || !osmTags[key]) return;
+  if (!osmTags[key].includes(val)) {
+    osmTags[key].push(val);
+    renderOsmTagsEditor();
+  }
+  input.value = "";
+}
+
+function removeTag(key, val) {
+  if (!osmTags[key]) return;
+  osmTags[key] = osmTags[key].filter((t) => t !== val);
+  renderOsmTagsEditor();
+}
+
+async function saveOsmTags() {
+  try {
+    const res = await fetch("/api/osm-tags", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(osmTags) });
+    const data = await res.json();
+    if (data.ok) toast("OSM tag configuration saved"); else toast("Failed to save", "error");
+  } catch { toast("Network error", "error"); }
+}
+
+async function loadTagPreset() {
+  const name = document.getElementById("tag-preset-select").value;
+  if (!name || !osmPresets[name]) return;
+  osmTags = JSON.parse(JSON.stringify(osmPresets[name]));
+  renderOsmTagsEditor();
+  toast(`Loaded preset: ${name}`);
+}
+
+async function saveTagPreset() {
+  const name = document.getElementById("tag-preset-name").value.trim();
+  if (!name) { toast("Enter a preset name", "error"); return; }
+  try {
+    const res = await fetch("/api/osm-tag-presets", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, config: osmTags }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      osmPresets[name] = JSON.parse(JSON.stringify(osmTags));
+      renderOsmTagsEditor();
+      toast(`Preset "${name}" saved`);
+    }
+  } catch { toast("Failed to save preset", "error"); }
+}
+
+// ── column selector (item #13) ──────────────────────────
+const ALL_COLUMNS = [
+  "osm_id", "name", "lat", "lon", "label", "distance_m",
+  "lot_area_sqft", "highway_type", "lanes",
+  "dist_bus_stop_m", "dist_hospital_m", "dist_school_m", "dist_park_m",
+  "res_ratio", "com_ratio", "median_income",
+];
+
+function renderColumnSelector() {
+  const container = document.getElementById("column-selector-list");
+  if (!container) return;
+  const active = visibleColumns || ALL_COLUMNS;
+  container.innerHTML = ALL_COLUMNS.map((col) => {
+    const on = active.includes(col);
+    return `<span class="col-toggle ${on ? "active" : ""}" onclick="toggleColumn('${col}')">${col}</span>`;
+  }).join("");
+}
+
+function toggleColumn(col) {
+  if (!visibleColumns) visibleColumns = [...ALL_COLUMNS];
+  const idx = visibleColumns.indexOf(col);
+  if (idx >= 0) {
+    if (visibleColumns.length <= 1) return; // keep at least one
+    visibleColumns.splice(idx, 1);
+  } else {
+    visibleColumns.push(col);
+  }
+  renderColumnSelector();
+  // refresh markers if active
+  loadAmenityMarkers();
+}
+
+// ── session export/import (item #10) ────────────────────
+async function exportSession() {
+  try {
+    const res = await fetch("/api/session/export");
+    const data = await res.json();
+    // add client-side state
+    data.enabled_notebooks = Array.from(enabledNotebooks);
+    data.visible_columns = visibleColumns;
+    data.theme = currentTheme();
+
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `site_renderer_session_${new Date().toISOString().slice(0,10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast("Session exported");
+  } catch { toast("Export failed", "error"); }
+}
+
+function importSession() {
+  document.getElementById("session-file-input").click();
+}
+
+async function handleSessionFile(input) {
+  const file = input.files[0];
+  if (!file) return;
+  try {
+    const text = await file.text();
+    const data = JSON.parse(text);
+
+    // send to server
+    await fetch("/api/session/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+
+    // apply client-side state
+    if (data.enabled_notebooks) {
+      enabledNotebooks = new Set(data.enabled_notebooks);
+    }
+    if (data.visible_columns) {
+      visibleColumns = data.visible_columns;
+    }
+    if (data.theme) {
+      document.documentElement.setAttribute("data-theme", data.theme);
+      localStorage.setItem("theme", data.theme);
+      swapTiles(data.theme);
+    }
+    if (data.osm_tags) {
+      osmTags = data.osm_tags;
+    }
+
+    // reload locations
+    locations.forEach((l) => { map.removeLayer(l.marker); map.removeLayer(l.circle); });
+    locations = [];
+    activeId = null;
+    nextId = 1;
+    await loadLocations();
+    await loadCsvStatus();
+    renderPipelineTab();
+    renderColumnSelector();
+
+    toast("Session imported successfully");
+  } catch (err) {
+    console.error(err);
+    toast("Failed to import session", "error");
+  }
+  input.value = "";
+}
+
 // ── clear all ───────────────────────────────────────────
 function clearAll() {
   if (!locations.length) return;
   if (!confirm("Remove all locations?")) return;
   [...locations].forEach((l) => { map.removeLayer(l.marker); map.removeLayer(l.circle); });
   locations = []; activeId = null; nextId = 1;
+  if (amenityClusterGroup) { map.removeLayer(amenityClusterGroup); amenityClusterGroup = null; }
+  if (currentRouteLayer) { map.removeLayer(currentRouteLayer); currentRouteLayer = null; }
   renderSidebar(); updateMinimap();
   toast("All locations cleared");
 }
 
 // ── init ────────────────────────────────────────────────
 async function init() {
-  await loadNotebooks();
+  await Promise.all([loadNotebooks(), loadOsmTags(), loadOsmPresets()]);
   await loadLocations();
   await loadCsvStatus();
   renderPipelineTab();
+  renderColumnSelector();
 
   try {
     const res = await fetch("/api/pipeline-status");
     const data = await res.json();
-    if (data.running) { showPipelineRunning(true); startPolling(); switchTab("pipeline"); }
+    if (data.running) { showPipelineRunning(true); startPolling(); }
   } catch { /* ignore */ }
 }
 

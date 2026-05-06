@@ -7,12 +7,25 @@ Serves the interactive Leaflet map and exposes API endpoints for:
   - POST     /api/cancel           → cancel running pipeline
   - GET      /api/pipeline-status  → per-site, per-notebook status
   - GET      /api/csv-status       → which site CSVs exist
+  - GET      /api/csv-history/<n>  → all CSV versions for a site
+  - GET      /api/csv-site/<n>     → paginated CSV viewer
+  - GET      /api/csv-site/<n>/download
+  - POST     /api/csv-delete       → delete specific CSV files
+  - POST     /api/csv-cleanup      → remove orphan intermediates
+  - GET      /api/csv-markers/<n>  → lightweight marker data
   - POST     /api/combine          → merge all site CSVs
   - GET      /api/csv-data         → combined CSV as JSON
+  - GET/POST /api/osm-tags         → OSM tag configuration
+  - GET/POST /api/osm-tag-presets  → tag presets
+  - GET      /api/session/export   → export all settings as JSON
+  - POST     /api/session/import   → import settings from JSON
+  - POST     /api/walking-route    → compute OSMnx walking route
   - GET      /api/geocode          → proxy to Nominatim
+  - GET      /api/notebooks        → notebook definitions
 """
 
 import json
+import math
 import os
 import signal
 import subprocess
@@ -23,13 +36,16 @@ import time as _time
 from datetime import datetime
 from pathlib import Path
 
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, render_template, request, send_file
 
 # ── paths ────────────────────────────────────────────────
 BASE_DIR = Path(__file__).resolve().parent
 SCRAPER_DIR = BASE_DIR.parent / "General-OSM-Scraper"
 LOCATIONS_FILE = SCRAPER_DIR / "locations.json"
 CSV_DIR = SCRAPER_DIR / "csv"
+OSM_TAGS_FILE = SCRAPER_DIR / "osm_tags_config.json"
+OSM_PRESETS_FILE = SCRAPER_DIR / "osm_tag_presets.json"
+PLUTO_FILE = SCRAPER_DIR.parent / "ramy" / "NYC_pluto_25v4_csv" / "pluto_25v4.csv"
 
 app = Flask(__name__)
 
@@ -37,24 +53,51 @@ app = Flask(__name__)
 NOTEBOOKS = [
     {"id": "01", "file": "01_identifiers.ipynb",           "label": "Identifiers"},
     {"id": "02", "file": "02_y_target.ipynb",              "label": "Y-Target"},
-    {"id": "03", "file": "03_morphological.ipynb",         "label": "Morphological"},
+    {"id": "03", "file": "03_morphological.ipynb",         "label": "Morphological",         "needs_pluto": True},
     {"id": "04", "file": "04_synergistic_proximity.ipynb", "label": "Synergistic Proximity"},
-    {"id": "05", "file": "05_socioeconomic.ipynb",         "label": "Socioeconomic"},
+    {"id": "05", "file": "05_socioeconomic.ipynb",         "label": "Socioeconomic",          "needs_pluto": True},
     {"id": "06", "file": "06_joker.ipynb",                 "label": "Joker (median income)"},
 ]
 
+# ── default OSM tags ─────────────────────────────────────
+DEFAULT_OSM_TAGS = {
+    "commercial_tags": ["shop", "amenity", "office", "craft", "tourism", "leisure"],
+    "amenity_exclude": [
+        "parking", "bench", "waste_basket", "recycling", "post_box",
+        "bicycle_parking", "drinking_water", "telephone", "toilets",
+        "street_lamp", "fire_station", "school", "place_of_worship",
+        "clock", "bicycle_rental", "parking_entrance", "vending_machine",
+        "fountain", "charging_station", "device_charging_station",
+        "bus_station", "social_facility", "community_centre", "police",
+        "university", "college", "kindergarten",
+    ],
+    "leisure_exclude": [
+        "garden", "park", "pitch", "playground", "outdoor_seating",
+        "swimming_pool", "dog_park", "nature_reserve", "picnic_site",
+        "shelter", "watering_place", "common",
+    ],
+    "tourism_exclude": [
+        "artwork", "viewpoint", "information", "attraction",
+        "picnic_site", "camp_site", "caravan_site",
+    ],
+    "shop_exclude": ["vacant", "yes"],
+}
+
 # ── pipeline state ───────────────────────────────────────
-# status per site: { "site_name": { "01": "pending"|"running"|"done"|"failed"|"skipped", ... } }
 pipeline_state = {
     "running": False,
     "cancelled": False,
     "current_site": None,
     "current_notebook": None,
-    "sites": {},        # per-site, per-notebook status
-    "log": [],          # recent log lines
+    "sites": {},
+    "log": [],
 }
-_pipeline_process = None   # subprocess.Popen reference
+_pipeline_process = None
 _pipeline_lock = threading.Lock()
+
+# ── graph cache for walking routes ───────────────────────
+_graph_cache = {}
+_graph_cache_lock = threading.Lock()
 
 
 # ── pages ────────────────────────────────────────────────
@@ -113,32 +156,182 @@ def geocode():
     return jsonify(results)
 
 
-# ── API: CSV status (which sites have CSVs) ─────────────
+# ── API: CSV status ──────────────────────────────────────
 @app.route("/api/csv-status", methods=["GET"])
 def csv_status():
-    """Return which site CSVs exist in the csv/ directory."""
     existing = {}
-    if CSV_DIR.exists():
-        for f in CSV_DIR.glob("*_20*.csv"):
-            name = f.stem
-            # strip the timestamp suffix: everything after the last date pattern
-            parts = name.rsplit("_", 2)
-            if len(parts) >= 3:
-                site_name = name[: name.rfind("_" + parts[-2])]
-                if site_name != "combined":
-                    existing[site_name] = {
-                        "file": f.name,
-                        "modified": f.stat().st_mtime,
-                    }
+    if not CSV_DIR.exists():
+        return jsonify(existing)
+
+    candidates = {}
+    for f in CSV_DIR.glob("*_20*.csv"):
+        stem = f.stem
+        parts = stem.rsplit("_", 2)
+        if len(parts) < 3:
+            continue
+        site_name = stem[: stem.rfind("_" + parts[-2])]
+        if site_name == "combined":
+            continue
+        mtime = f.stat().st_mtime
+        if site_name not in candidates or mtime > candidates[site_name]["mtime"]:
+            candidates[site_name] = {"file": f.name, "mtime": mtime, "path": f}
+
+    for site_name, info in candidates.items():
+        entry = {"file": info["file"], "modified": info["mtime"], "params": None}
+        sidecar = CSV_DIR / f"{site_name}.params.json"
+        if sidecar.exists():
+            try:
+                entry["params"] = json.loads(sidecar.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+        existing[site_name] = entry
+
     return jsonify(existing)
 
 
-# ── API: CSV data ────────────────────────────────────────
-@app.route("/api/csv-data", methods=["GET"])
-def get_csv_data():
-    """Return the most recent combined CSV as JSON."""
+# ── API: CSV history (all versions for a site) ───────────
+@app.route("/api/csv-history/<site_name>", methods=["GET"])
+def csv_history(site_name):
+    if not CSV_DIR.exists():
+        return jsonify([])
+    files = sorted(
+        [f for f in CSV_DIR.glob(f"{site_name}_20*.csv")],
+        key=lambda f: f.stat().st_mtime,
+        reverse=True,
+    )
+    result = []
+    for f in files:
+        stat = f.stat()
+        result.append({
+            "file": f.name,
+            "size_bytes": stat.st_size,
+            "modified": stat.st_mtime,
+            "modified_str": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
+        })
+    return jsonify(result)
+
+
+# ── API: CSV data for a single site (paginated) ─────────
+@app.route("/api/csv-site/<site_name>", methods=["GET"])
+def get_site_csv(site_name):
     import pandas as pd
 
+    page      = int(request.args.get("page", 0))
+    page_size = int(request.args.get("size", 50))
+    page_size = max(1, min(page_size, 200))
+    sort_col  = request.args.get("sort", None)
+    sort_dir  = request.args.get("dir", "asc")
+
+    matches = sorted(
+        [f for f in CSV_DIR.glob(f"{site_name}_20*.csv")],
+        key=lambda f: f.stat().st_mtime,
+        reverse=True,
+    )
+    if not matches:
+        return jsonify({"error": f"No CSV found for site '{site_name}'"}), 404
+
+    latest = matches[0]
+    df = pd.read_csv(latest)
+
+    if sort_col and sort_col in df.columns:
+        ascending = sort_dir != "desc"
+        df = df.sort_values(sort_col, ascending=ascending, na_position="last")
+
+    total_rows = len(df)
+    total_pages = max(1, -(-total_rows // page_size))
+    page = max(0, min(page, total_pages - 1))
+
+    page_df = df.iloc[page * page_size : (page + 1) * page_size]
+    page_df = page_df.where(page_df.notna(), None)
+
+    return jsonify({
+        "site": site_name,
+        "file": latest.name,
+        "rows": total_rows,
+        "total_pages": total_pages,
+        "page": page,
+        "page_size": page_size,
+        "columns": list(df.columns),
+        "data": page_df.to_dict(orient="records"),
+    })
+
+
+# ── API: download CSV for a single site ─────────────────
+@app.route("/api/csv-site/<site_name>/download", methods=["GET"])
+def download_site_csv(site_name):
+    matches = sorted(
+        [f for f in CSV_DIR.glob(f"{site_name}_20*.csv")],
+        key=lambda f: f.stat().st_mtime,
+        reverse=True,
+    )
+    if not matches:
+        return jsonify({"error": f"No CSV found for site '{site_name}'"}), 404
+    return send_file(matches[0], as_attachment=True, download_name=matches[0].name)
+
+
+# ── API: CSV markers (lightweight for map) ───────────────
+@app.route("/api/csv-markers/<site_name>", methods=["GET"])
+def csv_markers(site_name):
+    import pandas as pd
+
+    matches = sorted(
+        [f for f in CSV_DIR.glob(f"{site_name}_20*.csv")],
+        key=lambda f: f.stat().st_mtime,
+        reverse=True,
+    )
+    if not matches:
+        return jsonify({"error": f"No CSV found for site '{site_name}'"}), 404
+
+    df = pd.read_csv(matches[0])
+    cols = ["osm_id", "name", "lat", "lon", "label", "distance_m"]
+    cols = [c for c in cols if c in df.columns]
+    df = df[cols]
+    df = df.where(df.notna(), None)
+    return jsonify({"site": site_name, "markers": df.to_dict(orient="records")})
+
+
+# ── API: CSV delete ──────────────────────────────────────
+@app.route("/api/csv-delete", methods=["POST"])
+def csv_delete():
+    body = request.get_json(force=True)
+    files = body.get("files", [])
+    deleted = []
+    for fname in files:
+        fp = CSV_DIR / fname
+        if fp.exists() and fp.parent == CSV_DIR and fp.suffix == ".csv":
+            fp.unlink()
+            deleted.append(fname)
+            # also remove sidecar if it's the latest
+            site_name = fname.rsplit("_", 2)[0] if fname.count("_") >= 2 else None
+            if site_name:
+                sidecar = CSV_DIR / f"{site_name}.params.json"
+                if sidecar.exists():
+                    sidecar.unlink()
+    return jsonify({"ok": True, "deleted": deleted})
+
+
+# ── API: CSV cleanup (remove intermediates) ──────────────
+INTERMEDIATES = [
+    "csv/00_base_data.csv", "csv/01_identifiers.csv", "csv/02_y_target.csv",
+    "csv/03_morphological.csv", "csv/04_synergistic_proximity.csv",
+    "csv/05_socioeconomic.csv", "csv/06_joker.csv",
+]
+
+@app.route("/api/csv-cleanup", methods=["POST"])
+def csv_cleanup():
+    removed = []
+    for f in INTERMEDIATES:
+        p = SCRAPER_DIR / f
+        if p.exists():
+            p.unlink()
+            removed.append(f)
+    return jsonify({"ok": True, "removed": removed})
+
+
+# ── API: CSV data (combined) ────────────────────────────
+@app.route("/api/csv-data", methods=["GET"])
+def get_csv_data():
+    import pandas as pd
     csv_files = sorted(CSV_DIR.glob("combined_*.csv"))
     if not csv_files:
         return jsonify([])
@@ -147,19 +340,176 @@ def get_csv_data():
     return jsonify(df.to_dict(orient="records"))
 
 
+# ── API: OSM tag configuration ──────────────────────────
+@app.route("/api/osm-tags", methods=["GET"])
+def get_osm_tags():
+    if OSM_TAGS_FILE.exists():
+        try:
+            data = json.loads(OSM_TAGS_FILE.read_text(encoding="utf-8"))
+            return jsonify(data)
+        except Exception:
+            pass
+    return jsonify(DEFAULT_OSM_TAGS)
+
+
+@app.route("/api/osm-tags", methods=["POST"])
+def save_osm_tags():
+    data = request.get_json(force=True)
+    OSM_TAGS_FILE.write_text(
+        json.dumps(data, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    return jsonify({"ok": True})
+
+
+# ── API: OSM tag presets ─────────────────────────────────
+@app.route("/api/osm-tag-presets", methods=["GET"])
+def get_osm_tag_presets():
+    if OSM_PRESETS_FILE.exists():
+        try:
+            return jsonify(json.loads(OSM_PRESETS_FILE.read_text(encoding="utf-8")))
+        except Exception:
+            pass
+    return jsonify({"default": DEFAULT_OSM_TAGS})
+
+
+@app.route("/api/osm-tag-presets", methods=["POST"])
+def save_osm_tag_preset():
+    body = request.get_json(force=True)
+    name = body.get("name", "").strip()
+    config = body.get("config")
+    if not name or not config:
+        return jsonify({"error": "name and config required"}), 400
+
+    presets = {}
+    if OSM_PRESETS_FILE.exists():
+        try:
+            presets = json.loads(OSM_PRESETS_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    presets[name] = config
+    OSM_PRESETS_FILE.write_text(
+        json.dumps(presets, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    return jsonify({"ok": True, "presets": list(presets.keys())})
+
+
+# ── API: session export/import ──────────────────────────
+@app.route("/api/session/export", methods=["GET"])
+def session_export():
+    locations = []
+    if LOCATIONS_FILE.exists():
+        try:
+            locations = json.loads(LOCATIONS_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+
+    osm_tags = DEFAULT_OSM_TAGS
+    if OSM_TAGS_FILE.exists():
+        try:
+            osm_tags = json.loads(OSM_TAGS_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+
+    return jsonify({
+        "version": 1,
+        "exported_at": datetime.now().isoformat(),
+        "locations": locations,
+        "osm_tags": osm_tags,
+    })
+
+
+@app.route("/api/session/import", methods=["POST"])
+def session_import():
+    data = request.get_json(force=True)
+    imported = []
+
+    if "locations" in data and isinstance(data["locations"], list):
+        LOCATIONS_FILE.write_text(
+            json.dumps(data["locations"], indent=4, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+        imported.append("locations")
+
+    if "osm_tags" in data and isinstance(data["osm_tags"], dict):
+        OSM_TAGS_FILE.write_text(
+            json.dumps(data["osm_tags"], indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+        imported.append("osm_tags")
+
+    return jsonify({"ok": True, "imported": imported})
+
+
+# ── API: walking route via OSMnx ─────────────────────────
+def _haversine(lat1, lon1, lat2, lon2):
+    R = 6371000
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp = math.radians(lat2 - lat1)
+    dl = math.radians(lon2 - lon1)
+    a = math.sin(dp/2)**2 + math.cos(p1)*math.cos(p2)*math.sin(dl/2)**2
+    return 2 * R * math.asin(math.sqrt(a))
+
+
+@app.route("/api/walking-route", methods=["POST"])
+def walking_route():
+    try:
+        import osmnx as ox
+        import networkx as nx
+    except ImportError:
+        return jsonify({"error": "osmnx not installed"}), 500
+
+    body = request.get_json(force=True)
+    o_lat, o_lon = body["origin_lat"], body["origin_lon"]
+    d_lat, d_lon = body["dest_lat"], body["dest_lon"]
+
+    try:
+        dist = max(600, _haversine(o_lat, o_lon, d_lat, d_lon) * 1.5)
+        c_lat = (o_lat + d_lat) / 2
+        c_lon = (o_lon + d_lon) / 2
+
+        # use cache keyed by rounded center + dist
+        cache_key = (round(c_lat, 3), round(c_lon, 3), round(dist, -2))
+        with _graph_cache_lock:
+            G = _graph_cache.get(cache_key)
+
+        if G is None:
+            G = ox.graph_from_point((c_lat, c_lon), dist=dist, network_type="walk")
+            with _graph_cache_lock:
+                if len(_graph_cache) > 20:
+                    _graph_cache.pop(next(iter(_graph_cache)))
+                _graph_cache[cache_key] = G
+
+        orig_node = ox.nearest_nodes(G, o_lon, o_lat)
+        dest_node = ox.nearest_nodes(G, d_lon, d_lat)
+        route = nx.shortest_path(G, orig_node, dest_node, weight="length")
+        route_coords = [[G.nodes[n]["y"], G.nodes[n]["x"]] for n in route]
+        length = nx.shortest_path_length(G, orig_node, dest_node, weight="length")
+
+        return jsonify({"route": route_coords, "length_m": round(length, 1)})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ── API: PLUTO status ───────────────────────────────────
+@app.route("/api/pluto-status", methods=["GET"])
+def pluto_status():
+    return jsonify({"available": PLUTO_FILE.exists(), "path": str(PLUTO_FILE)})
+
+
 # ── pipeline runner ──────────────────────────────────────
 def _log(msg):
     ts = datetime.now().strftime("%H:%M:%S")
     line = f"[{ts}] {msg}"
     pipeline_state["log"].append(line)
-    # keep last 200 lines
     if len(pipeline_state["log"]) > 200:
         pipeline_state["log"] = pipeline_state["log"][-200:]
     print(line)
 
 
 def _run_notebook(nb_file, params, site_name, nb_id):
-    """Run a single notebook via papermill. Returns True on success."""
     global _pipeline_process
 
     pipeline_state["current_notebook"] = nb_id
@@ -179,17 +529,13 @@ def _run_notebook(nb_file, params, site_name, nb_id):
         str(nb_path), str(tmp_out),
         "--kernel", "python3",
     ]
-    # add parameters
     for key, val in params.items():
         cmd.extend(["-p", key, str(val)])
 
     try:
         proc = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            cwd=str(SCRAPER_DIR),
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, cwd=str(SCRAPER_DIR),
         )
         with _pipeline_lock:
             _pipeline_process = proc
@@ -228,18 +574,20 @@ def _run_notebook(nb_file, params, site_name, nb_id):
 
 
 def _get_nb_params(loc, nb_id):
-    """Return papermill parameters for a given notebook and location."""
     walk_min = loc.get("walk_minutes", 15.0)
     walk_spd = loc.get("walk_speed_m_min", 80.0)
     radius_m = walk_min * walk_spd
     net_dist = int(radius_m + 300)
 
     if nb_id == "01":
-        return {
+        p = {
             "LAT": loc["lat"], "LON": loc["lon"],
             "WALK_MINUTES": walk_min, "WALK_SPEED_M_MIN": walk_spd,
             "RADIUS_M": radius_m,
         }
+        if OSM_TAGS_FILE.exists():
+            p["OSM_TAGS_CONFIG"] = str(OSM_TAGS_FILE)
+        return p
     elif nb_id == "03":
         return {
             "ORIGIN_LAT": loc["lat"], "ORIGIN_LON": loc["lon"],
@@ -247,12 +595,6 @@ def _get_nb_params(loc, nb_id):
         }
     return {}
 
-
-INTERMEDIATES = [
-    "csv/00_base_data.csv", "csv/01_identifiers.csv", "csv/02_y_target.csv",
-    "csv/03_morphological.csv", "csv/04_synergistic_proximity.csv",
-    "csv/05_socioeconomic.csv", "csv/06_joker.csv",
-]
 
 FINAL_COLUMNS = [
     "osm_id", "name", "lat", "lon", "label", "distance_m",
@@ -271,8 +613,7 @@ CSV_GROUPS = [
 ]
 
 
-def _merge_site_csvs(site_name, run_id):
-    """Merge intermediate CSVs for one site into a final per-site CSV."""
+def _merge_site_csvs(site_name, run_id, loc_params=None):
     import pandas as pd
 
     id_csv = SCRAPER_DIR / "csv" / "01_identifiers.csv"
@@ -296,6 +637,11 @@ def _merge_site_csvs(site_name, run_id):
     out_path = CSV_DIR / f"{site_name}_{run_id}.csv"
     df.to_csv(out_path, index=False, encoding="utf-8")
     _log(f"{site_name} | merged → {out_path.name} ({len(df)} rows)")
+
+    if loc_params:
+        sidecar = CSV_DIR / f"{site_name}.params.json"
+        sidecar.write_text(json.dumps(loc_params, ensure_ascii=False), encoding="utf-8")
+
     return out_path
 
 
@@ -307,7 +653,6 @@ def _cleanup_intermediates():
 
 
 def _run_site(loc, enabled_notebooks, run_id):
-    """Run pipeline for a single location. Returns True if all notebooks succeeded."""
     site_name = loc["name"]
     pipeline_state["current_site"] = site_name
     _log(f"{'='*40}")
@@ -317,7 +662,6 @@ def _run_site(loc, enabled_notebooks, run_id):
     all_ok = True
     for nb in NOTEBOOKS:
         if pipeline_state["cancelled"]:
-            # mark remaining as skipped
             for nb2 in NOTEBOOKS:
                 if pipeline_state["sites"][site_name].get(nb2["id"]) == "pending":
                     pipeline_state["sites"][site_name][nb2["id"]] = "skipped"
@@ -328,25 +672,36 @@ def _run_site(loc, enabled_notebooks, run_id):
             _log(f"{site_name} | {nb['id']} SKIPPED")
             continue
 
+        # auto-skip PLUTO-dependent notebooks if PLUTO not available
+        if nb.get("needs_pluto") and not PLUTO_FILE.exists():
+            pipeline_state["sites"][site_name][nb["id"]] = "skipped"
+            _log(f"{site_name} | {nb['id']} SKIPPED (PLUTO data not available – NYC only)")
+            continue
+
         params = _get_nb_params(loc, nb["id"])
         ok = _run_notebook(nb["file"], params, site_name, nb["id"])
         if not ok:
             all_ok = False
-            # Mark remaining as skipped on failure (except already run ones)
             for nb2 in NOTEBOOKS:
                 if pipeline_state["sites"][site_name].get(nb2["id"]) == "pending":
                     pipeline_state["sites"][site_name][nb2["id"]] = "skipped"
             break
 
     if all_ok:
-        _merge_site_csvs(site_name, run_id)
+        loc_params = {
+            "lat":              loc.get("lat"),
+            "lon":              loc.get("lon"),
+            "walk_minutes":     loc.get("walk_minutes"),
+            "walk_speed_m_min": loc.get("walk_speed_m_min"),
+            "notebooks":        sorted(enabled_notebooks),
+        }
+        _merge_site_csvs(site_name, run_id, loc_params)
 
     _cleanup_intermediates()
     return all_ok
 
 
 def _pipeline_thread(site_names, locations_data, enabled_notebooks):
-    """Background thread that runs the pipeline for given sites."""
     run_id = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
     for loc in locations_data:
@@ -368,25 +723,22 @@ def _pipeline_thread(site_names, locations_data, enabled_notebooks):
 # ── API: run pipeline ───────────────────────────────────
 @app.route("/api/run-site", methods=["POST"])
 def run_site():
-    """Run pipeline for one or more sites."""
     if pipeline_state["running"]:
         return jsonify({"error": "Pipeline is already running"}), 409
 
     body = request.get_json(force=True)
-    site_names = body.get("sites", [])               # list of site names to run
-    enabled_notebooks = body.get("notebooks", [])     # list of notebook IDs to run
+    site_names = body.get("sites", [])
+    enabled_notebooks = body.get("notebooks", [])
 
     if not site_names:
         return jsonify({"error": "No sites specified"}), 400
     if not enabled_notebooks:
         return jsonify({"error": "No notebooks selected"}), 400
 
-    # Load locations
     if not LOCATIONS_FILE.exists():
         return jsonify({"error": "locations.json not found"}), 404
     locations_data = json.loads(LOCATIONS_FILE.read_text(encoding="utf-8"))
 
-    # Init status
     pipeline_state["running"] = True
     pipeline_state["cancelled"] = False
     pipeline_state["log"] = []
@@ -410,7 +762,6 @@ def run_site():
 
 @app.route("/api/run-all", methods=["POST"])
 def run_all():
-    """Run pipeline for all locations."""
     if pipeline_state["running"]:
         return jsonify({"error": "Pipeline is already running"}), 409
 
@@ -422,7 +773,6 @@ def run_all():
     locations_data = json.loads(LOCATIONS_FILE.read_text(encoding="utf-8"))
     site_names = [loc["name"] for loc in locations_data]
 
-    # Init status
     pipeline_state["running"] = True
     pipeline_state["cancelled"] = False
     pipeline_state["log"] = []
@@ -472,22 +822,18 @@ def get_pipeline_status():
 # ── API: combine CSVs ───────────────────────────────────
 @app.route("/api/combine", methods=["POST"])
 def combine_csvs():
-    """Merge all per-site CSVs into a combined CSV."""
     import pandas as pd
 
     if not CSV_DIR.exists():
         return jsonify({"error": "csv/ directory not found"}), 404
 
-    # Find the most recent CSV for each site
     site_csvs = {}
     for f in CSV_DIR.glob("*_20*.csv"):
         if f.stem.startswith("combined"):
             continue
-        # Extract site name (everything before the timestamp)
         stem = f.stem
-        # timestamp format: YYYY-MM-DD_HH-MM-SS (19 chars)
         if len(stem) > 20:
-            site_name = stem[:-20]  # remove _YYYY-MM-DD_HH-MM-SS
+            site_name = stem[:-20]
             if site_name not in site_csvs or f.stat().st_mtime > site_csvs[site_name][1]:
                 site_csvs[site_name] = (f, f.stat().st_mtime)
 
@@ -514,12 +860,20 @@ def combine_csvs():
 # ── API: notebook definitions ────────────────────────────
 @app.route("/api/notebooks", methods=["GET"])
 def get_notebooks():
-    return jsonify(NOTEBOOKS)
+    result = []
+    for nb in NOTEBOOKS:
+        entry = dict(nb)
+        if nb.get("needs_pluto"):
+            entry["needs_pluto"] = True
+            entry["pluto_available"] = PLUTO_FILE.exists()
+        result.append(entry)
+    return jsonify(result)
 
 
 # ── main ─────────────────────────────────────────────────
 if __name__ == "__main__":
     print(f"Locations file : {LOCATIONS_FILE}")
     print(f"CSV directory  : {CSV_DIR}")
+    print(f"PLUTO data     : {'FOUND' if PLUTO_FILE.exists() else 'NOT FOUND (NYC-only notebooks will be skipped)'}")
     print(f"Open http://localhost:5000 in your browser")
     app.run(debug=True, port=5000)
