@@ -242,7 +242,13 @@ def get_site_csv(site_name):
     page = max(0, min(page, total_pages - 1))
 
     page_df = df.iloc[page * page_size : (page + 1) * page_size]
-    page_df = page_df.where(page_df.notna(), None)
+
+    # Convert to records and replace NaN/NaT with None for JSON serialization
+    records = page_df.to_dict(orient="records")
+    for row in records:
+        for k, v in row.items():
+            if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
+                row[k] = None
 
     return jsonify({
         "site": site_name,
@@ -252,7 +258,7 @@ def get_site_csv(site_name):
         "page": page,
         "page_size": page_size,
         "columns": list(df.columns),
-        "data": page_df.to_dict(orient="records"),
+        "data": records,
     })
 
 
@@ -307,6 +313,22 @@ def csv_delete():
                 sidecar = CSV_DIR / f"{site_name}.params.json"
                 if sidecar.exists():
                     sidecar.unlink()
+    return jsonify({"ok": True, "deleted": deleted})
+
+
+@app.route("/api/csv-delete-site", methods=["POST"])
+def csv_delete_site():
+    body = request.get_json(force=True)
+    site_name = body.get("site", "")
+    if not site_name:
+        return jsonify({"error": "No site specified"}), 400
+    deleted = []
+    for f in CSV_DIR.glob(f"{site_name}_20*.csv"):
+        f.unlink()
+        deleted.append(f.name)
+    sidecar = CSV_DIR / f"{site_name}.params.json"
+    if sidecar.exists():
+        sidecar.unlink()
     return jsonify({"ok": True, "deleted": deleted})
 
 
@@ -634,6 +656,10 @@ def _merge_site_csvs(site_name, run_id, loc_params=None):
     df = df[[c for c in FINAL_COLUMNS if c in df.columns]]
     df.insert(0, "location", site_name)
 
+    # Remove previous versions of this site's CSV
+    for old in CSV_DIR.glob(f"{site_name}_20*.csv"):
+        old.unlink()
+
     out_path = CSV_DIR / f"{site_name}_{run_id}.csv"
     df.to_csv(out_path, index=False, encoding="utf-8")
     _log(f"{site_name} | merged → {out_path.name} ({len(df)} rows)")
@@ -845,6 +871,11 @@ def combine_csvs():
         dfs.append(pd.read_csv(csv_path))
 
     df_combined = pd.concat(dfs, ignore_index=True)
+
+    # Remove previous combined CSVs
+    for old in CSV_DIR.glob("combined_20*.csv"):
+        old.unlink()
+
     run_id = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     out_path = CSV_DIR / f"combined_{run_id}.csv"
     df_combined.to_csv(out_path, index=False, encoding="utf-8")

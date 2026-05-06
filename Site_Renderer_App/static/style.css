@@ -386,6 +386,15 @@ html, body {
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+  cursor: pointer;
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+.location-index:hover {
+  transform: scale(1.25);
+  box-shadow: 0 0 8px rgba(255,255,255,0.4);
+}
+.location-index:active {
+  transform: scale(1.1);
 }
 
 .name-input {
@@ -739,7 +748,7 @@ html, body {
 #minimap-container {
   position: absolute;
   bottom: 24px;
-  right: 24px;
+  right: 50px;
   width: 180px;
   height: 130px;
   border: 1px solid var(--border);
@@ -815,6 +824,27 @@ html, body {
   background: var(--accent);
   color: white;
   border-color: var(--accent);
+}
+
+.btn-delete-csv {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: var(--bg-input);
+  color: #FF453A;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.btn-delete-csv:hover {
+  background: #FF453A;
+  color: white;
+  border-color: #FF453A;
 }
 
 /* ── CSV modal ──────────────────────────────────────── */
@@ -995,6 +1025,18 @@ html, body {
 .btn-page:hover:not(:disabled) { background: var(--bg-hover); }
 .btn-page:disabled { opacity: 0.35; cursor: not-allowed; }
 
+.csv-page-input {
+  width: 48px;
+  padding: 4px 6px;
+  border-radius: var(--radius-xs);
+  border: 1px solid var(--border);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 12px;
+  text-align: center;
+  font-family: var(--font);
+}
+
 .csv-modal-loading {
   flex: 1;
   display: flex;
@@ -1004,6 +1046,7 @@ html, body {
   font-size: 14px;
   padding: 60px;
 }
+
 
 /* ── context popup ──────────────────────────────────── */
 #ctx-popup {
@@ -1374,6 +1417,28 @@ html, body {
   box-shadow: var(--shadow-sm) !important;
   border-radius: var(--radius-xs) !important;
   overflow: hidden;
+}
+
+.fit-all-control {
+  margin-bottom: 4px !important;
+  border: none !important;
+  box-shadow: var(--shadow-sm) !important;
+  border-radius: var(--radius-xs) !important;
+  overflow: hidden;
+}
+.fit-all-control a {
+  width: 30px !important;
+  height: 30px !important;
+  line-height: 30px !important;
+  font-size: 18px !important;
+  text-align: center;
+  background: var(--bg-elevated) !important;
+  color: var(--text-primary) !important;
+  text-decoration: none;
+  display: block;
+}
+.fit-all-control a:hover {
+  background: var(--bg-hover) !important;
 }
 
 /* minimap tooltip */

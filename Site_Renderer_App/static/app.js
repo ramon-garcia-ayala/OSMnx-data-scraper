@@ -69,7 +69,29 @@ function swapTiles(theme) {
 
 // ── main map ────────────────────────────────────────────
 const map = L.map("map", { zoomControl: false }).setView([40.7589, -73.9851], 13);
-L.control.zoom({ position: "topright" }).addTo(map);
+L.control.zoom({ position: "bottomright" }).addTo(map);
+
+// ── fit-all button (above zoom controls) ────────────────
+const FitAllControl = L.Control.extend({
+  options: { position: "bottomright" },
+  onAdd() {
+    const btn = L.DomUtil.create("div", "leaflet-bar leaflet-control fit-all-control");
+    btn.innerHTML = `<a href="#" title="Fit all sites" role="button" aria-label="Fit all sites">⊡</a>`;
+    L.DomEvent.disableClickPropagation(btn);
+    btn.querySelector("a").addEventListener("click", (e) => {
+      e.preventDefault();
+      fitAllSites();
+    });
+    return btn;
+  },
+});
+new FitAllControl().addTo(map);
+
+function fitAllSites() {
+  if (!locations.length) { toast("No locations to fit", "error"); return; }
+  const group = L.featureGroup(locations.map((l) => l.circle));
+  map.fitBounds(group.getBounds().pad(0.1));
+}
 
 const theme = currentTheme();
 mainTileLayer = L.tileLayer(TILE_URLS[theme], {
@@ -428,6 +450,14 @@ function applyToAll(field) {
   toast(`Applied ${field.replace(/_/g, " ")} = ${val} to all sites`);
 }
 
+// ── zoom to site perimeter ──────────────────────────────
+function zoomToSite(id) {
+  const loc = locations.find((l) => l.id === id);
+  if (!loc) return;
+  setActive(id);
+  map.fitBounds(loc.circle.getBounds().pad(0.1));
+}
+
 // ── render sidebar ──────────────────────────────────────
 function renderSidebar() {
   const list = document.getElementById("location-list");
@@ -450,7 +480,7 @@ function renderSidebar() {
     <div class="location-card ${isActive ? "active" : ""}" data-id="${loc.id}" onclick="setActive(${loc.id})">
       <div class="location-card-header">
         <div style="display:flex; align-items:center; gap:10px;">
-          <div class="location-index" style="background:${color}">${i + 1}</div>
+          <div class="location-index" style="background:${color}" onclick="event.stopPropagation(); zoomToSite(${loc.id})">${i + 1}</div>
           <input class="name-input" value="${loc.name}"
             onchange="updateField(${loc.id}, 'name', this.value)"
             onclick="event.stopPropagation()" />
@@ -476,7 +506,6 @@ function renderSidebar() {
     </div>`;
   }).join("");
 
-  updateCombineButton();
 }
 
 // ── pipeline tab ────────────────────────────────────────
@@ -549,6 +578,7 @@ function renderPipelineSites(statusData) {
           ${csvBadge}
         </div>
         <div style="display:flex;gap:5px;align-items:center;">
+          ${hasCsv ? `<button class="btn-delete-csv" onclick="deleteSiteCsv('${loc.name}')" title="Delete CSV">&times;</button>` : ""}
           ${hasCsv ? `<button class="btn-view-csv" onclick="openCsvModal('${loc.name}')" title="Open CSV">&#8599;</button>` : ""}
           <button class="btn-run-site" ${btnDisabled} onclick="runSite('${loc.name}')">
             ${isRunning ? "Running..." : "Run"}
@@ -597,7 +627,7 @@ async function loadNotebooks() {
 }
 
 async function loadCsvStatus() {
-  try { const res = await fetch("/api/csv-status"); csvStatus = await res.json(); updateCombineButton(); }
+  try { const res = await fetch("/api/csv-status"); csvStatus = await res.json(); }
   catch (err) { console.error("Failed to load CSV status:", err); }
 }
 
@@ -609,6 +639,24 @@ async function loadOsmTags() {
 async function loadOsmPresets() {
   try { const res = await fetch("/api/osm-tag-presets"); osmPresets = await res.json(); }
   catch (err) { console.error("Failed to load OSM presets:", err); }
+}
+
+async function deleteSiteCsv(siteName) {
+  if (!confirm(`Delete CSV for "${siteName}"?`)) return;
+  try {
+    const res = await fetch("/api/csv-delete-site", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ site: siteName }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      toast(`CSV deleted for ${siteName}`);
+      await loadCsvStatus();
+      renderPipelineSites();
+      loadAmenityMarkers();
+    } else { toast(data.error || "Delete failed", "error"); }
+  } catch { toast("Failed to delete CSV", "error"); }
 }
 
 async function saveLocations() {
@@ -694,18 +742,17 @@ async function pollPipeline() {
         const anyFailed = allSites.some((s) => Object.values(s).some((v) => v === "failed"));
         if (data.cancelled) toast("Pipeline cancelled", "error");
         else if (anyFailed) toast("Pipeline completed with errors", "error");
-        else toast("Pipeline completed successfully!");
+        else {
+          toast("Pipeline completed successfully!");
+          const chk = document.getElementById("chk-auto-combine");
+          if (chk && chk.checked) combineCSVs();
+        }
       }
       loadCsvStatus();
     }
   } catch { pipelinePolling = false; setTimeout(pollPipeline, 5000); }
 }
 
-function updateCombineButton() {
-  const btn = document.getElementById("btn-combine");
-  if (!locations.length) { btn.disabled = true; return; }
-  btn.disabled = !locations.every((loc) => csvStatus[loc.name]);
-}
 
 // ── CSV modal (server-side pagination + sorting + label colors) ──
 let csvModalMeta = null;
@@ -818,7 +865,11 @@ function _showCsvOverlay(siteName, meta, rows) {
         </table>
       </div>
       <div class="csv-modal-footer">
-        <span class="csv-page-info">Page ${page + 1} of ${total_pages} &nbsp;&middot;&nbsp; rows ${rowStart}\u2013${rowEnd}</span>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <span class="csv-page-info">Page</span>
+          <input type="number" class="csv-page-input" id="csv-page-input" value="${page + 1}" min="1" max="${total_pages}" onkeydown="if(event.key==='Enter')csvGoToPage()" />
+          <span class="csv-page-info">of ${total_pages} &nbsp;&middot;&nbsp; rows ${rowStart}\u2013${rowEnd}</span>
+        </div>
         <div style="display:flex;gap:6px;">
           <button class="btn-page" onclick="csvPageNav(-1)" ${page === 0 ? "disabled" : ""}>&larr; Prev</button>
           <button class="btn-page" onclick="csvPageNav(1)"  ${page >= total_pages - 1 ? "disabled" : ""}>Next &rarr;</button>
@@ -837,6 +888,15 @@ async function csvPageNav(dir) {
   await _fetchAndRenderCsvPage(csvModalMeta.site, next);
 }
 
+function csvGoToPage() {
+  if (!csvModalMeta) return;
+  const input = document.getElementById("csv-page-input");
+  const target = parseInt(input.value, 10) - 1;
+  if (isNaN(target) || target < 0 || target >= csvModalMeta.total_pages) return;
+  _showCsvOverlay(csvModalMeta.site, null, null);
+  _fetchAndRenderCsvPage(csvModalMeta.site, target);
+}
+
 function closeCsvModal() {
   const el = document.getElementById("csv-modal-overlay");
   if (el) el.remove();
@@ -850,6 +910,7 @@ document.addEventListener("keydown", (e) => {
     if (e.key === "ArrowLeft")  csvPageNav(-1);
   }
 });
+
 
 // ── amenity markers on map (item #5) ────────────────────
 async function loadAmenityMarkers() {

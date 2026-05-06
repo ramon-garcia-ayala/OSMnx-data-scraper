@@ -130,9 +130,14 @@
           <button id="btn-run-all" class="btn btn-run" onclick="runAll()">Run All Sites</button>
           <button id="btn-cancel" class="btn btn-cancel" onclick="cancelPipeline()" style="display:none;">Cancel</button>
         </div>
-        <button id="btn-combine" class="btn btn-primary" onclick="combineCSVs()" disabled>
-          Combine CSVs
-        </button>
+        <label class="nb-checkbox" style="margin-top:8px;">
+          <input type="checkbox" id="chk-auto-combine" checked />
+          <span>Auto-combine CSVs on completion</span>
+        </label>
+        <div style="display:flex;gap:6px;margin-top:6px;">
+          <button class="btn btn-secondary" onclick="openCsvModal('combined')" style="flex:1;">Preview Combined CSV</button>
+          <button class="btn-delete-csv" onclick="deleteSiteCsv('combined')" title="Delete Combined CSV">&times;</button>
+        </div>
       </div>
     </div>
 
