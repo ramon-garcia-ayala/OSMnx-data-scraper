@@ -1,0 +1,38 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Launch Site Renderer",
+      "type": "shell",
+      "command": "${workspaceFolder}\\launch_site_renderer.bat",
+      "windows": {
+        "command": "${workspaceFolder}\\launch_site_renderer.bat"
+      },
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "presentation": {
+        "reveal": "silent",
+        "panel": "shared",
+        "close": true
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Launch Site Renderer (terminal)",
+      "type": "shell",
+      "command": "python",
+      "args": ["Site_Renderer_App/Site_Renderer_App.py"],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "group": "build",
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      },
+      "problemMatcher": []
+    }
+  ]
+}

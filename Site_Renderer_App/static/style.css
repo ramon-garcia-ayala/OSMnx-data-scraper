@@ -113,7 +113,6 @@ html, body {
 .panel-right {
   right: 16px;
   width: 360px;
-  bottom: 170px; /* leave room for minimap */
 }
 
 .panel-left.collapsed {
@@ -690,6 +689,90 @@ html, body {
 .nb-step.skipped  { background: var(--bg-input); color: var(--text-tertiary); opacity: 0.4; }
 
 /* pipeline log */
+/* ── Pipeline progress bar ───────────────────────────── */
+#pipeline-progress-section {
+  padding: 0 2px 2px;
+  flex-shrink: 0;
+}
+#pipeline-progress-bar-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.progress-track {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--bg-input);
+  overflow: hidden;
+  display: flex;
+}
+.progress-seg {
+  height: 100%;
+  transition: width 0.4s ease;
+  flex-shrink: 0;
+}
+.seg-done    { background: var(--green); }
+.seg-running { background: #FFD60A; animation: pulse 1.2s ease-in-out infinite; }
+.seg-failed  { background: var(--red); }
+
+.progress-label {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  font-family: var(--mono);
+}
+.prog-lbl-running { color: #FFD60A; }
+.prog-lbl-failed  { color: var(--red); }
+.prog-lbl-pending { color: var(--text-tertiary); }
+
+/* ── Plot generation progress ────────────────────────── */
+.plot-progress-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--bg-input);
+  overflow: hidden;
+  margin-top: 8px;
+}
+.plot-progress-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
+  transition: width 0.5s ease;
+}
+.plot-progress-label {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  font-family: var(--mono);
+  margin-top: 4px;
+}
+.plot-prog-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+.plot-prog-chip {
+  font-size: 9px;
+  font-family: var(--mono);
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  color: var(--text-tertiary);
+  background: var(--bg-input);
+  text-transform: capitalize;
+  white-space: nowrap;
+}
+.plot-prog-chip.done {
+  color: var(--green);
+  border-color: var(--green);
+  background: rgba(48, 209, 88, 0.08);
+}
+.plot-prog-chip.spinning {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: rgba(10,132,255,0.08);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
 #pipeline-log-section {
   background: var(--bg-card);
   border-radius: var(--radius-sm);
@@ -697,8 +780,33 @@ html, body {
   flex-shrink: 0;
 }
 
+.log-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.btn-copy-log {
+  font-size: 10px;
+  font-family: var(--font);
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition);
+}
+.btn-copy-log:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
 #pipeline-log {
-  max-height: 160px;
+  max-height: 340px;
+  min-height: 48px;
   overflow-y: auto;
   font-family: var(--mono);
   font-size: 11px;
@@ -706,9 +814,13 @@ html, body {
   line-height: 1.7;
   white-space: pre-wrap;
   word-break: break-all;
+  resize: vertical;
 }
 
-#pipeline-log .log-line { padding: 1px 0; }
+#pipeline-log .log-line  { padding: 1px 0; }
+#pipeline-log .log-error { color: #FF453A; }
+#pipeline-log .log-ok    { color: #30D158; }
+#pipeline-log .log-running { color: #FFD60A; }
 
 .empty-pipeline {
   text-align: center;
@@ -755,8 +867,9 @@ html, body {
 /* ── mini-map ───────────────────────────────────────── */
 #minimap-container {
   position: absolute;
-  bottom: 24px;
-  right: 50px;
+  top: 16px;
+  right: 392px; /* 16px panel offset + 360px panel width + 16px gap */
+  bottom: auto;
   width: 180px;
   height: 130px;
   border: 1px solid var(--border);
@@ -772,6 +885,15 @@ html, body {
 
 #minimap { width: 100%; height: 100%; }
 #minimap .leaflet-control-container { display: none; }
+
+/* ── zoom controls: top-right, left of minimap ──────── */
+/* minimap: right=392px, width=180px → left edge at 572px from screen right
+   controls right edge = 572px + 8px gap = 580px
+   container right = 580px - 10px internal margin = 570px           */
+.leaflet-top.leaflet-right {
+  right: 570px !important;
+  top: 6px !important;   /* 6px + 10px margin = 16px visual top, matches minimap */
+}
 
 /* ── toast ──────────────────────────────────────────── */
 #toast {
@@ -795,9 +917,21 @@ html, body {
   box-shadow: var(--shadow-sm);
 }
 
-#toast.show { transform: translateX(-50%) translateY(0); }
+#toast.show    { transform: translateX(-50%) translateY(0); }
 #toast.success { border-color: var(--green); }
 #toast.error   { border-color: var(--red); }
+#toast.error.copyable {
+  pointer-events: all;
+  cursor: pointer;
+}
+#toast.error.copyable::after {
+  content: " · click to copy";
+  opacity: 0.55;
+  font-size: 11px;
+}
+#toast.error.copyable:hover {
+  background: var(--bg-hover);
+}
 #toast.loading-pulse {
   transform: translateX(-50%) translateY(0);
   border-color: var(--accent);
@@ -1532,4 +1666,142 @@ html, body {
 
 .leaflet-popup-close-button {
   color: var(--text-tertiary) !important;
+}
+
+/* ── Combined CSV & Plots ────────────────────────────── */
+.combined-csv-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.combined-csv-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.combined-csv-date {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+.combined-csv-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.combined-csv-actions .btn {
+  flex: 1;
+  min-width: 70px;
+  font-size: 11px;
+  padding: 5px 8px;
+}
+.plots-running-badge {
+  font-size: 11px;
+  color: var(--accent);
+  text-align: center;
+  padding: 4px 0;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+/* ── Plots column selector modal ─────────────────────── */
+#plots-col-selector-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.55);
+  backdrop-filter: blur(4px);
+  z-index: 9100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.plots-col-modal {
+  background: var(--bg-glass);
+  backdrop-filter: blur(30px) saturate(1.8);
+  -webkit-backdrop-filter: blur(30px) saturate(1.8);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  width: min(420px, 92vw);
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.plots-col-hint {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  padding: 8px 16px 4px;
+  margin: 0;
+  line-height: 1.5;
+}
+.plots-col-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 10px 16px 14px;
+  overflow-y: auto;
+}
+
+/* ── Plots gallery modal ─────────────────────────────── */
+#plots-gallery-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.65);
+  backdrop-filter: blur(6px);
+  z-index: 9100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.plots-gallery-modal {
+  background: var(--bg-glass);
+  backdrop-filter: blur(30px) saturate(1.8);
+  -webkit-backdrop-filter: blur(30px) saturate(1.8);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  width: min(900px, 95vw);
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.plots-gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 14px;
+  padding: 16px;
+  overflow-y: auto;
+}
+.plot-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.plot-card-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: capitalize;
+}
+.plot-thumb {
+  width: 100%;
+  height: 160px;
+  object-fit: cover;
+  border-radius: var(--radius-xs);
+  cursor: zoom-in;
+  transition: opacity var(--transition);
+}
+.plot-thumb:hover {
+  opacity: 0.85;
 }

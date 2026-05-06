@@ -95,6 +95,18 @@ pipeline_state = {
 _pipeline_process = None
 _pipeline_lock = threading.Lock()
 
+# ── ML plot paths & state ────────────────────────────────
+ML_NOTEBOOK    = BASE_DIR.parent / "ML_Plot" / "NYC_classification.ipynb"
+PLOTS_BASE_DIR = BASE_DIR.parent / "ML_Plot" / "outputs"
+
+plot_state = {
+    "running": False,
+    "run_id": None,
+    "log": [],
+}
+_plot_process = None
+_plot_lock    = threading.Lock()
+
 # ── graph cache for walking routes ───────────────────────
 _graph_cache = {}
 _graph_cache_lock = threading.Lock()
@@ -530,8 +542,8 @@ def _log(msg):
     ts = datetime.now().strftime("%H:%M:%S")
     line = f"[{ts}] {msg}"
     pipeline_state["log"].append(line)
-    if len(pipeline_state["log"]) > 200:
-        pipeline_state["log"] = pipeline_state["log"][-200:]
+    if len(pipeline_state["log"]) > 1000:
+        pipeline_state["log"] = pipeline_state["log"][-1000:]
     print(line)
 
 
@@ -579,8 +591,10 @@ def _run_notebook(nb_file, params, site_name, nb_id):
             return True
         else:
             pipeline_state["sites"][site_name][nb_id] = "failed"
-            err_short = (stderr or "")[-500:]
-            _log(f"{site_name} | {nb_id} FAILED (exit {proc.returncode}): {err_short}")
+            _log(f"{site_name} | {nb_id} FAILED (exit {proc.returncode})")
+            for line in (stderr or "").splitlines():
+                if line.strip():
+                    _log(line)
             return False
 
     except subprocess.TimeoutExpired:
@@ -903,6 +917,164 @@ def get_notebooks():
             entry["pluto_available"] = PLUTO_FILE.exists()
         result.append(entry)
     return jsonify(result)
+
+
+# ── ML plots runner ─────────────────────────────────────
+def _extract_notebook_traceback(nb_path):
+    """Read the executed notebook and extract traceback from failed cells."""
+    try:
+        nb = json.loads(nb_path.read_text(encoding="utf-8"))
+        lines = []
+        for cell in nb.get("cells", []):
+            for output in cell.get("outputs", []):
+                if output.get("output_type") in ("error", "stream"):
+                    tb = output.get("traceback") or []
+                    text = output.get("text", "")
+                    # strip ANSI color codes
+                    import re
+                    ansi = re.compile(r"\x1b\[[0-9;]*m")
+                    for t in tb:
+                        for l in ansi.sub("", t).splitlines():
+                            if l.strip():
+                                lines.append(l)
+                    if isinstance(text, list):
+                        text = "".join(text)
+                    for l in text.splitlines():
+                        if l.strip():
+                            lines.append(l)
+        return lines
+    except Exception as e:
+        return [f"(could not read notebook output: {e})"]
+
+
+def _run_plots_thread(csv_path, plots_dir, run_id, exclude_cols, skip_plots=""):
+    global _plot_process
+    plot_state["running"] = True
+    plot_state["run_id"]  = run_id
+    plot_state["log"]     = [f"[{datetime.now().strftime('%H:%M:%S')}] Starting plots..."]
+
+    tmp_out = Path(tempfile.mktemp(suffix=".ipynb"))
+    cmd = [
+        sys.executable, "-m", "papermill",
+        str(ML_NOTEBOOK), str(tmp_out),
+        "--kernel", "python3",
+        "--log-output",          # stream cell output to stderr
+        "-p", "CSV_PATH",     csv_path,
+        "-p", "PLOTS_DIR",    plots_dir,
+        "-p", "EXCLUDE_COLS", exclude_cols,
+    ]
+    try:
+        proc = subprocess.Popen(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,  # merge both streams
+            text=True, cwd=str(ML_NOTEBOOK.parent),
+        )
+        with _plot_lock:
+            _plot_process = proc
+        stdout, _ = proc.communicate(timeout=3600)
+        ts = datetime.now().strftime("%H:%M:%S")
+
+        if proc.returncode == 0:
+            plot_state["log"].append(f"[{ts}] Plots generated successfully")
+            # Delete plots the user chose to skip
+            if skip_plots:
+                plots_dir_path = Path(plots_dir)
+                for skip_id in skip_plots.split(","):
+                    sid = skip_id.strip().zfill(2)
+                    if sid:
+                        for f in plots_dir_path.glob(f"{sid}_*.png"):
+                            f.unlink()
+                            plot_state["log"].append(f"Skipped (removed): {f.name}")
+        else:
+            plot_state["log"].append(f"[{ts}] FAILED (exit {proc.returncode})")
+            # 1. Log merged stdout (papermill progress + cell output)
+            for line in (stdout or "").splitlines():
+                if line.strip():
+                    plot_state["log"].append(line)
+            # 2. Also extract traceback directly from the output notebook
+            if tmp_out.exists():
+                tb_lines = _extract_notebook_traceback(tmp_out)
+                if tb_lines:
+                    plot_state["log"].append("── Cell traceback ──")
+                    plot_state["log"].extend(tb_lines)
+
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        plot_state["log"].append("TIMEOUT — plot generation took too long")
+    except Exception as e:
+        plot_state["log"].append(f"ERROR: {e}")
+    finally:
+        plot_state["running"] = False
+        with _plot_lock:
+            _plot_process = None
+        if tmp_out.exists():
+            tmp_out.unlink()
+
+
+@app.route("/api/run-plots", methods=["POST"])
+def run_plots():
+    if plot_state["running"]:
+        return jsonify({"error": "Plot generation already running"}), 409
+
+    body         = request.get_json(force=True)
+    csv_filename = body.get("csv_file", "")
+    exclude_cols = body.get("exclude_cols", "")
+
+    csv_path = CSV_DIR / csv_filename
+    if not csv_path.exists():
+        return jsonify({"error": f"CSV not found: {csv_filename}"}), 404
+
+    skip_plots = body.get("skip_plots", "")
+
+    # Always write to a fixed "latest" folder — overwrites previous plots
+    plots_dir_path = PLOTS_BASE_DIR / "latest"
+    plots_dir_path.mkdir(parents=True, exist_ok=True)
+    for old in plots_dir_path.glob("*.png"):
+        old.unlink()
+
+    plots_dir    = plots_dir_path.as_posix()
+    csv_path_str = csv_path.as_posix()
+
+    threading.Thread(
+        target=_run_plots_thread,
+        args=(csv_path_str, plots_dir, "latest", exclude_cols, skip_plots),
+        daemon=True,
+    ).start()
+    return jsonify({"ok": True, "run_id": "latest"})
+
+
+@app.route("/api/plot-status", methods=["GET"])
+def get_plot_status():
+    plots_dir = PLOTS_BASE_DIR / "latest"
+    plots     = sorted([f.name for f in plots_dir.glob("*.png")]) if plots_dir.exists() else []
+    return jsonify({**plot_state, "plots": plots})
+
+
+@app.route("/api/plots/<filename>")
+def serve_plot(filename):
+    if ".." in filename:
+        return jsonify({"error": "Invalid path"}), 400
+    return send_file(PLOTS_BASE_DIR / "latest" / filename)
+
+
+@app.route("/api/combined-csv-info", methods=["GET"])
+def combined_csv_info():
+    if not CSV_DIR.exists():
+        return jsonify({"file": None})
+    files = sorted(
+        CSV_DIR.glob("combined_20*.csv"),
+        key=lambda f: f.stat().st_mtime, reverse=True,
+    )
+    if not files:
+        return jsonify({"file": None})
+    f         = files[0]
+    plots_dir = PLOTS_BASE_DIR / "latest"
+    plots     = sorted([p.name for p in plots_dir.glob("*.png")]) if plots_dir.exists() else []
+    return jsonify({
+        "file":     f.name,
+        "run_id":   "latest",
+        "modified": f.stat().st_mtime,
+        "plots":    plots,
+    })
 
 
 # ── main ─────────────────────────────────────────────────

@@ -69,11 +69,11 @@ function swapTiles(theme) {
 
 // ── main map ────────────────────────────────────────────
 const map = L.map("map", { zoomControl: false }).setView([40.7589, -73.9851], 13);
-L.control.zoom({ position: "bottomright" }).addTo(map);
+L.control.zoom({ position: "topright" }).addTo(map);
 
 // ── fit-all button (above zoom controls) ────────────────
 const FitAllControl = L.Control.extend({
-  options: { position: "bottomright" },
+  options: { position: "topright" },
   onAdd() {
     const btn = L.DomUtil.create("div", "leaflet-bar leaflet-control fit-all-control");
     btn.innerHTML = `<a href="#" title="Fit all sites" role="button" aria-label="Fit all sites">⊡</a>`;
@@ -232,11 +232,36 @@ function csvParamsMatch(loc, params) {
   );
 }
 
+let _toastTimer = null;
+
 function toast(msg, type = "success") {
   const el = document.getElementById("toast");
   el.textContent = msg;
   el.className = "show " + type;
-  setTimeout(() => { el.className = ""; }, 3000);
+
+  // Error toasts are clickable — copy text and confirm
+  if (type === "error") {
+    el.classList.add("copyable");
+    el.onclick = () => {
+      navigator.clipboard.writeText(msg).catch(() => {
+        const ta = document.createElement("textarea");
+        ta.value = msg; ta.style.cssText = "position:fixed;opacity:0";
+        document.body.appendChild(ta); ta.select();
+        document.execCommand("copy"); ta.remove();
+      });
+      el.textContent = "Copied!";
+      el.classList.remove("copyable");
+      el.onclick = null;
+      clearTimeout(_toastTimer);
+      _toastTimer = setTimeout(() => { el.className = ""; }, 1200);
+    };
+  } else {
+    el.classList.remove("copyable");
+    el.onclick = null;
+  }
+
+  clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => { el.className = ""; el.onclick = null; }, 3000);
 }
 
 function escapeHtml(str) {
@@ -607,10 +632,48 @@ function renderPipelineSites(statusData) {
 
 function renderPipelineLog(logLines) {
   const container = document.getElementById("pipeline-log");
+  const copyBtn   = document.getElementById("btn-copy-log");
   const lines = logLines || [];
-  if (!lines.length) { container.innerHTML = '<span style="color:var(--text-tertiary)">No log output yet</span>'; return; }
-  container.innerHTML = lines.map((l) => `<div class="log-line">${escapeHtml(l)}</div>`).join("");
+
+  if (!lines.length) {
+    container.innerHTML = '<span style="color:var(--text-tertiary)">No log output yet</span>';
+    if (copyBtn) copyBtn.style.display = "none";
+    return;
+  }
+
+  const hasError = lines.some((l) => /FAILED|ERROR|Traceback|Exception/i.test(l));
+  if (copyBtn) copyBtn.style.display = hasError ? "" : "none";
+
+  container.innerHTML = lines.map((l) => {
+    let cls = "log-line";
+    if (/FAILED|ERROR|Traceback|Exception/i.test(l)) cls += " log-error";
+    else if (/ OK$| done$/i.test(l) || /successfully|COMPLETE/i.test(l)) cls += " log-ok";
+    else if (/starting\.\.\.|running/i.test(l)) cls += " log-running";
+    return `<div class="${cls}">${escapeHtml(l)}</div>`;
+  }).join("");
+
   container.scrollTop = container.scrollHeight;
+}
+
+function copyLogError() {
+  const lines = Array.from(document.querySelectorAll("#pipeline-log .log-line"))
+    .map((el) => el.textContent)
+    .join("\n");
+  navigator.clipboard.writeText(lines).then(
+    () => toast("Log copied to clipboard"),
+    () => {
+      // fallback for browsers without clipboard API
+      const ta = document.createElement("textarea");
+      ta.value = lines;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      ta.remove();
+      toast("Log copied to clipboard");
+    }
+  );
 }
 
 // ── edit mode ───────────────────────────────────────────
@@ -736,8 +799,12 @@ async function combineCSVs() {
   try {
     const res = await fetch("/api/combine", { method: "POST" });
     const data = await res.json();
-    if (data.ok) toast(`Combined ${data.rows} rows from ${data.sites.length} sites`);
-    else toast(data.error || "Combine failed", "error");
+    if (data.ok) {
+      toast(`Combined ${data.rows} rows from ${data.sites.length} sites`);
+      await loadCombinedCsvInfo();
+    } else {
+      toast(data.error || "Combine failed", "error");
+    }
   } catch { toast("Failed to combine CSVs", "error"); }
 }
 
@@ -745,6 +812,43 @@ function showPipelineRunning(running) {
   document.getElementById("btn-run-all").disabled = running;
   document.getElementById("btn-cancel").style.display = running ? "" : "none";
   document.querySelectorAll(".btn-run-site").forEach((b) => (b.disabled = running));
+}
+
+// ── pipeline progress bar ────────────────────────────────
+function renderPipelineProgress(statusData) {
+  const section = document.getElementById("pipeline-progress-section");
+  if (!section) return;
+
+  const sites = statusData?.sites || {};
+  if (!Object.keys(sites).length) { section.style.display = "none"; return; }
+
+  let done = 0, running = 0, failed = 0, pending = 0;
+  Object.values(sites).forEach((site) => {
+    Object.values(site).forEach((st) => {
+      if      (st === "done")    done++;
+      else if (st === "running") running++;
+      else if (st === "failed")  failed++;
+      else if (st === "pending") pending++;
+    });
+  });
+
+  const total = done + running + failed + pending;
+  if (!total) { section.style.display = "none"; return; }
+
+  section.style.display = "";
+  const donePct    = (done    / total * 100).toFixed(1);
+  const runningPct = (running / total * 100).toFixed(1);
+  const failedPct  = (failed  / total * 100).toFixed(1);
+
+  document.getElementById("prog-done").style.width    = donePct    + "%";
+  document.getElementById("prog-running").style.width = runningPct + "%";
+  document.getElementById("prog-failed").style.width  = failedPct  + "%";
+
+  const parts = [`${done}/${total} steps`];
+  if (running) parts.push(`<span class="prog-lbl-running">${running} running</span>`);
+  if (failed)  parts.push(`<span class="prog-lbl-failed">${failed} failed</span>`);
+  if (pending) parts.push(`<span class="prog-lbl-pending">${pending} pending</span>`);
+  document.getElementById("pipeline-progress-label").innerHTML = parts.join(" · ");
 }
 
 // ── polling ─────────────────────────────────────────────
@@ -756,6 +860,7 @@ async function pollPipeline() {
     const data = await res.json();
     renderPipelineSites(data);
     renderPipelineLog(data.log);
+    renderPipelineProgress(data);
 
     if (data.running) {
       showPipelineRunning(true);
@@ -1347,11 +1452,252 @@ function clearAll() {
   toast("All locations cleared");
 }
 
+// ── ML Plots ─────────────────────────────────────────────
+let combinedCsvInfo  = null;
+let plotPolling      = false;
+let plotExcludeCols  = new Set(["median_income", "lanes"]);
+let plotSkipSet      = new Set(); // plot ids to skip (none skipped by default)
+
+const AVAILABLE_PLOTS = [
+  { id: "01", label: "Count by Location & Label" },
+  { id: "02", label: "Boxplot: Commercial Ratio" },
+  { id: "03", label: "Boxplot: Dist. to Hospital" },
+  { id: "04", label: "Boxplot: Residential Ratio" },
+  { id: "05", label: "Scatter: Residential Ratio" },
+  { id: "06", label: "Pairplot per Location" },
+  { id: "07", label: "Pairplot Combined" },
+  { id: "08", label: "Correlation Heatmap" },
+  { id: "09", label: "Confusion Matrix (LR)" },
+  { id: "10", label: "Confusion Matrix (XGB)" },
+];
+
+const PLOT_FEATURE_COLS = [
+  "lot_area_sqft", "dist_bus_stop_m", "dist_hospital_m", "dist_school_m",
+  "dist_park_m", "com_ratio", "res_ratio", "median_income", "lanes", "highway_type",
+];
+
+async function loadCombinedCsvInfo() {
+  try {
+    const res = await fetch("/api/combined-csv-info");
+    combinedCsvInfo = await res.json();
+  } catch { combinedCsvInfo = null; }
+  renderCombinedSection();
+}
+
+function renderCombinedSection() {
+  const section = document.getElementById("combined-plots-section");
+  const info    = document.getElementById("combined-plots-info");
+  if (!combinedCsvInfo || !combinedCsvInfo.file) {
+    section.style.display = "none";
+    return;
+  }
+  section.style.display = "";
+  const { file, run_id, modified, plots } = combinedCsvInfo;
+  const date = new Date(modified * 1000).toLocaleString();
+  const hasPlots = plots && plots.length > 0;
+
+  info.innerHTML = `
+    <div class="combined-csv-card">
+      <div class="combined-csv-name" title="${escapeHtml(file)}">${escapeHtml(file)}</div>
+      <div class="combined-csv-date">${date}</div>
+      <div class="combined-csv-actions">
+        <button class="btn btn-secondary" style="flex:1" onclick="openCsvModal('combined')">Preview</button>
+        ${hasPlots
+          ? `<button class="btn btn-secondary" onclick="openPlotsGalleryLatest()">View Plots (${plots.length})</button>`
+          : ""}
+        <button class="btn btn-run" onclick="openPlotsColumnSelector('${run_id}', '${file}')">
+          ${hasPlots ? "Re-run Plots" : "Generate Plots"}
+        </button>
+      </div>
+      <div id="plot-progress-wrap" style="display:none;"></div>
+    </div>`;
+}
+
+function plot_state_running() { return false; } // updated by polling
+
+function openPlotsColumnSelector(runId, csvFile) {
+  const old = document.getElementById("plots-col-selector-overlay");
+  if (old) old.remove();
+
+  const overlay = document.createElement("div");
+  overlay.id = "plots-col-selector-overlay";
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.remove(); });
+
+  // Column chips
+  const colChips = PLOT_FEATURE_COLS.map((col) => {
+    const included = !plotExcludeCols.has(col);
+    return `<span class="col-toggle ${included ? "active" : ""}"
+      onclick="_clickPlotCol('${col}', this)">${col}</span>`;
+  }).join("");
+
+  // Plot chips — all active by default (none skipped)
+  const plotChips = AVAILABLE_PLOTS.map(({ id, label }) => {
+    const included = !plotSkipSet.has(id);
+    return `<span class="col-toggle ${included ? "active" : ""}"
+      onclick="_clickPlotToggle('${id}', this)">${label}</span>`;
+  }).join("");
+
+  overlay.innerHTML = `
+    <div class="plots-col-modal">
+      <div class="csv-modal-header">
+        <span class="csv-modal-title">Plot Configuration</span>
+        <button class="ctx-close" onclick="document.getElementById('plots-col-selector-overlay').remove()">&#x2715;</button>
+      </div>
+      <p class="plots-col-hint" style="margin-top:10px;font-weight:600;">Plots to generate</p>
+      <p class="plots-col-hint" style="margin-top:2px;">Highlighted = will be generated. Click to toggle.</p>
+      <div class="plots-col-grid">${plotChips}</div>
+      <p class="plots-col-hint" style="margin-top:12px;font-weight:600;">ML feature columns</p>
+      <p class="plots-col-hint" style="margin-top:2px;">Identifiers (osm_id, lat, lon, name…) are always excluded from ML.</p>
+      <div class="plots-col-grid">${colChips}</div>
+      <div class="csv-modal-footer" style="justify-content:flex-end;gap:8px;">
+        <button class="btn btn-secondary" onclick="document.getElementById('plots-col-selector-overlay').remove()">Cancel</button>
+        <button class="btn btn-run" onclick="_confirmRunPlots('${runId}', '${csvFile}')">Run Plots &#9654;</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+
+function _clickPlotCol(col, el) {
+  const nowIncluded = el.classList.toggle("active");
+  if (nowIncluded) plotExcludeCols.delete(col);
+  else             plotExcludeCols.add(col);
+}
+
+function _clickPlotToggle(id, el) {
+  const nowIncluded = el.classList.toggle("active");
+  if (nowIncluded) plotSkipSet.delete(id);
+  else             plotSkipSet.add(id);
+}
+
+async function _confirmRunPlots(runId, csvFile) {
+  document.getElementById("plots-col-selector-overlay")?.remove();
+  const excludeCols = Array.from(plotExcludeCols).join(",");
+  const skipPlots   = Array.from(plotSkipSet).join(",");
+  await runPlots(csvFile, excludeCols, skipPlots);
+}
+
+async function runPlots(csvFile, excludeCols, skipPlots = "") {
+  try {
+    const res = await fetch("/api/run-plots", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ csv_file: csvFile, exclude_cols: excludeCols, skip_plots: skipPlots }),
+    });
+    const data = await res.json();
+    if (data.error) { toast(data.error, "error"); return; }
+    toast("Plot generation started...");
+    startPlotPolling();
+  } catch { toast("Failed to start plot generation", "error"); }
+}
+
+function startPlotPolling() {
+  if (plotPolling) return;
+  plotPolling = true;
+  _pollPlots();
+}
+
+async function _pollPlots() {
+  try {
+    const res  = await fetch("/api/plot-status");
+    const data = await res.json();
+
+    _renderPlotProgress(data);
+    renderPipelineLog(data.log);   // show plot log in the same log panel
+
+    if (data.running) {
+      setTimeout(_pollPlots, 2000);
+    } else {
+      plotPolling = false;
+      if (data.plots && data.plots.length > 0) {
+        toast(`${data.plots.length} plots generated!`);
+        await loadCombinedCsvInfo();
+        openPlotsGallery(data.run_id, data.plots);
+      } else {
+        toast("Plot generation failed — see Log for details", "error");
+        _renderPlotProgress(null);
+      }
+    }
+  } catch { plotPolling = false; }
+}
+
+function _renderPlotProgress(data) {
+  const el = document.getElementById("plot-progress-wrap");
+  if (!el) return;
+
+  if (!data || (!data.running && (!data.plots || !data.plots.length))) {
+    el.style.display = "none";
+    return;
+  }
+
+  const plots   = data.plots || [];
+  const running = data.running;
+
+  // Build chip list from existing files
+  const chips = plots.map((fname) => {
+    const short = fname.replace(/^\d+_/, "").replace(/_/g, " ").replace(".png", "");
+    return `<span class="plot-prog-chip done" title="${escapeHtml(fname)}">${escapeHtml(short)}</span>`;
+  }).join("");
+
+  const spinner = running
+    ? `<span class="plot-prog-chip spinning">generating…</span>`
+    : "";
+
+  el.style.display = "";
+  el.innerHTML = `
+    <div class="plot-progress-track">
+      <div class="plot-progress-fill" style="width:${running ? Math.max(plots.length * 9, 5) : 100}%"></div>
+    </div>
+    <div class="plot-progress-label">${plots.length} plot${plots.length !== 1 ? "s" : ""} saved${running ? "…" : " ✓"}</div>
+    <div class="plot-prog-chips">${chips}${spinner}</div>`;
+}
+
+async function openPlotsGalleryLatest() {
+  await loadCombinedCsvInfo();
+  const plots = combinedCsvInfo?.plots;
+  if (plots && plots.length > 0) openPlotsGallery("latest", plots);
+  else toast("No plots found", "error");
+}
+
+function openPlotsGallery(runId, plots) {
+  const old = document.getElementById("plots-gallery-overlay");
+  if (old) old.remove();
+
+  const overlay = document.createElement("div");
+  overlay.id = "plots-gallery-overlay";
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.remove(); });
+
+  const cards = plots.map((fname) => {
+    const url = `/api/plots/${encodeURIComponent(fname)}`;
+    const label = fname.replace(/^\d+_/, "").replace(/_/g, " ").replace(".png", "");
+    return `
+      <div class="plot-card">
+        <div class="plot-card-label">${escapeHtml(label)}</div>
+        <a href="${url}" target="_blank">
+          <img class="plot-thumb" src="${url}" alt="${escapeHtml(fname)}" loading="lazy" />
+        </a>
+        <a class="btn-csv-download" href="${url}" download="${escapeHtml(fname)}" style="margin-top:6px;display:block;text-align:center;">
+          Download
+        </a>
+      </div>`;
+  }).join("");
+
+  overlay.innerHTML = `
+    <div class="plots-gallery-modal">
+      <div class="csv-modal-header">
+        <span class="csv-modal-title">Plots — ${escapeHtml(runId)}</span>
+        <button class="ctx-close" onclick="document.getElementById('plots-gallery-overlay').remove()">&#x2715;</button>
+      </div>
+      <div class="plots-gallery-grid">${cards}</div>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+
 // ── init ────────────────────────────────────────────────
 async function init() {
   await Promise.all([loadNotebooks(), loadOsmTags(), loadOsmPresets()]);
   await loadLocations();
   await loadCsvStatus();
+  await loadCombinedCsvInfo();
   renderPipelineTab();
   renderColumnSelector();
 
@@ -1359,6 +1705,12 @@ async function init() {
     const res = await fetch("/api/pipeline-status");
     const data = await res.json();
     if (data.running) { showPipelineRunning(true); startPolling(); }
+  } catch { /* ignore */ }
+
+  try {
+    const res = await fetch("/api/plot-status");
+    const data = await res.json();
+    if (data.running) startPlotPolling();
   } catch { /* ignore */ }
 }
 

@@ -4,6 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Site Renderer</title>
+  <link rel="icon" type="image/x-icon" href="/static/favicon.ico" />
+  <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon.png" />
 
   <!-- Leaflet -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -120,8 +122,26 @@
           <div class="section-title">Sites</div>
           <div id="pipeline-sites"></div>
         </div>
+        <div id="combined-plots-section" style="display:none;">
+          <div class="section-title">Combined CSV</div>
+          <div id="combined-plots-info"></div>
+        </div>
+        <div id="pipeline-progress-section" style="display:none;">
+          <div id="pipeline-progress-bar-wrap">
+            <div class="progress-track">
+              <div id="prog-done"    class="progress-seg seg-done"></div>
+              <div id="prog-running" class="progress-seg seg-running"></div>
+              <div id="prog-failed"  class="progress-seg seg-failed"></div>
+            </div>
+            <div id="pipeline-progress-label" class="progress-label"></div>
+          </div>
+        </div>
+
         <div id="pipeline-log-section">
-          <div class="section-title">Log</div>
+          <div class="log-header">
+            <span class="section-title" style="margin:0">Log</span>
+            <button id="btn-copy-log" class="btn-copy-log" style="display:none" onclick="copyLogError()" title="Copy error to clipboard">Copy Error</button>
+          </div>
           <div id="pipeline-log"></div>
         </div>
       </div>
