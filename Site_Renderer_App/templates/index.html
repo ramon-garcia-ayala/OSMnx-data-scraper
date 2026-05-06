@@ -9,13 +9,24 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
+  <!-- Leaflet MarkerCluster -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+  <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+
   <!-- App styles -->
   <link rel="stylesheet" href="/static/style.css" />
 
-  <!-- Restore theme before paint -->
+  <!-- Restore theme before paint (OS preference → localStorage override) -->
   <script>
-    const saved = localStorage.getItem("theme");
-    if (saved) document.documentElement.setAttribute("data-theme", saved);
+    (function() {
+      const saved = localStorage.getItem("theme");
+      if (saved) {
+        document.documentElement.setAttribute("data-theme", saved);
+      } else if (window.matchMedia("(prefers-color-scheme: light)").matches) {
+        document.documentElement.setAttribute("data-theme", "light");
+      }
+    })();
   </script>
 </head>
 <body>
@@ -23,15 +34,18 @@
     <!-- Full-bleed map -->
     <div id="map"></div>
 
-    <!-- Floating sidebar -->
-    <div id="sidebar">
-      <div id="sidebar-header">
+    <!-- ── Left panel: Locations ── -->
+    <div id="left-panel" class="floating-panel panel-left">
+      <div class="panel-header">
         <div class="header-row">
           <h1>Site Renderer</h1>
-          <button class="theme-toggle" onclick="toggleTheme()" title="Toggle dark / light mode">
-            <span class="toggle-icon moon">&#9790;</span>
-            <span class="toggle-icon sun">&#9728;</span>
-          </button>
+          <div style="display:flex;gap:6px;align-items:center;">
+            <button class="theme-toggle" onclick="toggleTheme()" title="Toggle dark / light mode">
+              <span class="toggle-icon moon">&#9790;</span>
+              <span class="toggle-icon sun">&#9728;</span>
+            </button>
+            <button class="panel-collapse-btn" onclick="togglePanel('left')" title="Collapse">&lsaquo;</button>
+          </div>
         </div>
         <div id="search-box">
           <input id="search-input" type="text" placeholder="Search city or address..." autocomplete="off" />
@@ -40,9 +54,10 @@
       </div>
 
       <!-- Segmented control -->
-      <div id="tabs">
-        <button class="tab active" data-tab="locations" onclick="switchTab('locations')">Locations</button>
-        <button class="tab" data-tab="pipeline" onclick="switchTab('pipeline')">Pipeline</button>
+      <div id="left-tabs" class="segmented-tabs">
+        <button class="tab active" data-tab="locations" onclick="switchLeftTab('locations')">Locations</button>
+        <button class="tab" data-tab="osm-tags" onclick="switchLeftTab('osm-tags')">OSM Tags</button>
+        <button class="tab" data-tab="settings" onclick="switchLeftTab('settings')">Settings</button>
       </div>
 
       <!-- Tab: Locations -->
@@ -50,8 +65,52 @@
         <div id="location-list"></div>
       </div>
 
-      <!-- Tab: Pipeline -->
-      <div id="tab-pipeline" class="tab-content">
+      <!-- Tab: OSM Tags -->
+      <div id="tab-osm-tags" class="tab-content">
+        <div id="osm-tags-editor"></div>
+      </div>
+
+      <!-- Tab: Settings -->
+      <div id="tab-settings" class="tab-content">
+        <div class="settings-section">
+          <div class="section-title">Column Selector</div>
+          <p class="settings-desc">Choose which CSV columns appear on map marker popups.</p>
+          <div id="column-selector-list"></div>
+        </div>
+        <div class="settings-section">
+          <div class="section-title">Session</div>
+          <div class="btn-row">
+            <button class="btn btn-secondary" onclick="exportSession()">Export</button>
+            <button class="btn btn-secondary" onclick="importSession()">Import</button>
+          </div>
+          <input type="file" id="session-file-input" accept=".json" style="display:none" onchange="handleSessionFile(this)" />
+        </div>
+      </div>
+
+      <!-- Actions -->
+      <div class="panel-actions">
+        <div class="btn-row">
+          <button class="btn btn-secondary" onclick="saveLocations()">Save</button>
+          <button class="btn btn-secondary" onclick="clearAll()">Clear All</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Left panel re-open button -->
+    <button id="left-panel-open" class="panel-reopen panel-reopen-left" onclick="togglePanel('left')" style="display:none;">
+      <span>&#9776;</span>
+    </button>
+
+    <!-- ── Right panel: Pipeline ── -->
+    <div id="right-panel" class="floating-panel panel-right">
+      <div class="panel-header">
+        <div class="header-row">
+          <button class="panel-collapse-btn" onclick="togglePanel('right')" title="Collapse">&rsaquo;</button>
+          <h1>Pipeline</h1>
+        </div>
+      </div>
+
+      <div id="tab-pipeline" class="tab-content active" style="display:flex;">
         <div id="notebook-config">
           <div class="section-title">Notebooks</div>
           <div id="notebook-checkboxes"></div>
@@ -66,12 +125,7 @@
         </div>
       </div>
 
-      <!-- Actions -->
-      <div id="sidebar-actions">
-        <div class="btn-row">
-          <button class="btn btn-secondary" onclick="saveLocations()">Save</button>
-          <button class="btn btn-secondary" onclick="clearAll()">Clear All</button>
-        </div>
+      <div class="panel-actions">
         <div class="btn-row">
           <button id="btn-run-all" class="btn btn-run" onclick="runAll()">Run All Sites</button>
           <button id="btn-cancel" class="btn btn-cancel" onclick="cancelPipeline()" style="display:none;">Cancel</button>
@@ -81,6 +135,11 @@
         </button>
       </div>
     </div>
+
+    <!-- Right panel re-open button -->
+    <button id="right-panel-open" class="panel-reopen panel-reopen-right" onclick="togglePanel('right')" style="display:none;">
+      <span>&#9776;</span>
+    </button>
 
     <!-- Floating mini-map -->
     <div id="minimap-container">
