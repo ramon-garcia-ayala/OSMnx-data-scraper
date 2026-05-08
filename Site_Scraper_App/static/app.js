@@ -7,7 +7,7 @@ let locations = [];
 let nextId = 1;
 let activeId = null;
 let notebookDefs = [];
-let enabledNotebooks = new Set(["01", "02", "03", "04", "05"]);
+let enabledNotebooks = new Set(["01", "02", "03", "04", "05", "07", "08", "09", "10", "11", "12", "13"]);
 let csvStatus = {};
 let pipelinePolling = false;
 let _pipelineStartTime = null;
@@ -560,7 +560,11 @@ function renderPipelineTab() {
 function renderNotebookCheckboxes() {
   const container = document.getElementById("notebook-checkboxes");
   if (!notebookDefs.length) { container.innerHTML = '<div style="color:var(--text-tertiary); font-size:12px">Loading...</div>'; return; }
-  container.innerHTML = notebookDefs.map((nb) => {
+
+  const core = notebookDefs.filter((nb) => !nb.group);
+  const enrichment = notebookDefs.filter((nb) => nb.group === "enrichment");
+
+  const coreHtml = core.map((nb) => {
     const checked = enabledNotebooks.has(nb.id) ? "checked" : "";
     const cls = nb.id === "06" ? " joker" : "";
     const plutoTag = nb.needs_pluto
@@ -574,6 +578,25 @@ function renderNotebookCheckboxes() {
       ${plutoTag}
     </label>`;
   }).join("");
+
+  const allEnriched = enrichment.every((nb) => enabledNotebooks.has(nb.id));
+  const enrichHtml = `
+    <div class="enrichment-group">
+      <label class="nb-checkbox enrichment-toggle">
+        <input type="checkbox" ${allEnriched ? "checked" : ""} onchange="toggleEnrichmentGroup(this.checked)" />
+        <span>Enrichment</span>
+        <span class="enrichment-ids">${enrichment.map((nb) => nb.id).join(" · ")}</span>
+      </label>
+    </div>`;
+
+  container.innerHTML = coreHtml + enrichHtml;
+}
+
+function toggleEnrichmentGroup(checked) {
+  notebookDefs.filter((nb) => nb.group === "enrichment").forEach((nb) => {
+    if (checked) enabledNotebooks.add(nb.id); else enabledNotebooks.delete(nb.id);
+  });
+  renderNotebookCheckboxes();
 }
 
 function toggleNotebook(id, checked) {
@@ -601,9 +624,17 @@ function renderPipelineSites(statusData) {
       return "pending";
     };
 
-    const steps = notebookDefs.map((nb) => {
+    const coreNbs = notebookDefs.filter((nb) => !nb.group);
+    const enrichNbs = notebookDefs.filter((nb) => nb.group === "enrichment");
+
+    const coreSteps = coreNbs.map((nb) => {
       const st = effectiveStatus(nb);
       return `<div class="nb-step ${st}" title="${nb.label}: ${st}">${nb.id}</div>`;
+    }).join("");
+
+    const enrichDots = enrichNbs.map((nb) => {
+      const st = effectiveStatus(nb);
+      return `<div class="nb-dot ${st}" title="${nb.label}: ${st}"></div>`;
     }).join("");
 
     const isRunning = Object.values(siteStatus).some((s) => s === "running");
@@ -627,7 +658,8 @@ function renderPipelineSites(statusData) {
           </button>
         </div>
       </div>
-      <div class="nb-steps">${steps}</div>
+      <div class="nb-steps">${coreSteps}</div>
+      <div class="nb-enrich-timeline">${enrichDots}</div>
     </div>`;
   }).join("");
 }

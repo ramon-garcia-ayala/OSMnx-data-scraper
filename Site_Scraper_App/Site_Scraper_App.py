@@ -46,6 +46,7 @@ CSV_DIR = SCRAPER_DIR / "csv"
 OSM_TAGS_FILE = SCRAPER_DIR / "osm_tags_config.json"
 OSM_PRESETS_FILE = SCRAPER_DIR / "osm_tag_presets.json"
 PLUTO_FILE = SCRAPER_DIR.parent / "ramy" / "NYC_pluto_25v4_csv" / "pluto_25v4.csv"
+PEDESTRIAN_FILE = SCRAPER_DIR.parent / "ramy" / "pedestrian_mobility"
 
 app = Flask(__name__)
 
@@ -57,6 +58,14 @@ NOTEBOOKS = [
     {"id": "04", "file": "04_synergistic_proximity.ipynb", "label": "Synergistic Proximity"},
     {"id": "05", "file": "05_socioeconomic.ipynb",         "label": "Socioeconomic",          "needs_pluto": True},
     {"id": "06", "file": "06_joker.ipynb",                 "label": "Joker (median income)"},
+    # ── enrichment notebooks ──────────────────────────────
+    {"id": "07", "file": "07_rent_proxy.ipynb",            "label": "Rent Proxy",             "group": "enrichment", "needs_pluto": True},
+    {"id": "08", "file": "08_building_age.ipynb",          "label": "Building Age",           "group": "enrichment", "needs_pluto": True},
+    {"id": "09", "file": "09_foot_traffic.ipynb",          "label": "Foot Traffic",           "group": "enrichment", "needs_pedestrian": True},
+    {"id": "10", "file": "10_subway_distance.ipynb",       "label": "Subway Distance",        "group": "enrichment"},
+    {"id": "11", "file": "11_shop_density.ipynb",          "label": "Shop Density",           "group": "enrichment"},
+    {"id": "12", "file": "12_population_density.ipynb",    "label": "Population Density",     "group": "enrichment"},
+    {"id": "13", "file": "13_mix_shop_types.ipynb",        "label": "Shop Type Mix",          "group": "enrichment"},
 ]
 
 # ── default OSM tags ─────────────────────────────────────
@@ -355,6 +364,10 @@ INTERMEDIATES = [
     "csv/00_base_data.csv", "csv/01_identifiers.csv", "csv/02_y_target.csv",
     "csv/03_morphological.csv", "csv/04_synergistic_proximity.csv",
     "csv/05_socioeconomic.csv", "csv/06_joker.csv",
+    "csv/07_rent_proxy.csv", "csv/08_building_age.csv",
+    "csv/09_foot_traffic.csv", "csv/10_subway_distance.csv",
+    "csv/11_shop_density.csv", "csv/12_population_density.csv",
+    "csv/13_mix_shop_types.csv",
 ]
 
 @app.route("/api/csv-cleanup", methods=["POST"])
@@ -642,6 +655,13 @@ FINAL_COLUMNS = [
     "dist_bus_stop_m", "dist_hospital_m", "dist_school_m", "dist_park_m",
     "res_ratio", "com_ratio",
     "median_income",
+    "assess_per_sqft",
+    "year_built",
+    "pedestrian_rank", "pedestrian_category",
+    "dist_subway_m",
+    "shops_within_100m",
+    "population_density",
+    "shop_mix_entropy",
 ]
 
 CSV_GROUPS = [
@@ -650,6 +670,13 @@ CSV_GROUPS = [
     ("csv/04_synergistic_proximity.csv", ["dist_bus_stop_m", "dist_hospital_m", "dist_school_m", "dist_park_m"]),
     ("csv/05_socioeconomic.csv",         ["com_ratio", "res_ratio"]),
     ("csv/06_joker.csv",                 ["median_income"]),
+    ("csv/07_rent_proxy.csv",            ["assess_per_sqft"]),
+    ("csv/08_building_age.csv",          ["year_built"]),
+    ("csv/09_foot_traffic.csv",          ["pedestrian_rank", "pedestrian_category"]),
+    ("csv/10_subway_distance.csv",       ["dist_subway_m"]),
+    ("csv/11_shop_density.csv",          ["shops_within_100m"]),
+    ("csv/12_population_density.csv",    ["population_density"]),
+    ("csv/13_mix_shop_types.csv",        ["shop_mix_entropy"]),
 ]
 
 
@@ -719,7 +746,13 @@ def _run_site(loc, enabled_notebooks, run_id):
         # auto-skip PLUTO-dependent notebooks if PLUTO not available
         if nb.get("needs_pluto") and not PLUTO_FILE.exists():
             pipeline_state["sites"][site_name][nb["id"]] = "skipped"
-            _log(f"{site_name} | {nb['id']} SKIPPED (PLUTO data not available – NYC only)")
+            _log(f"{site_name} | {nb['id']} SKIPPED (PLUTO data not available)")
+            continue
+
+        # auto-skip pedestrian-dependent notebooks if data not available
+        if nb.get("needs_pedestrian") and not PEDESTRIAN_FILE.exists():
+            pipeline_state["sites"][site_name][nb["id"]] = "skipped"
+            _log(f"{site_name} | {nb['id']} SKIPPED (pedestrian data not available)")
             continue
 
         params = _get_nb_params(loc, nb["id"])
@@ -913,8 +946,9 @@ def get_notebooks():
     for nb in NOTEBOOKS:
         entry = dict(nb)
         if nb.get("needs_pluto"):
-            entry["needs_pluto"] = True
             entry["pluto_available"] = PLUTO_FILE.exists()
+        if nb.get("needs_pedestrian"):
+            entry["pedestrian_available"] = PEDESTRIAN_FILE.exists()
         result.append(entry)
     return jsonify(result)
 
