@@ -1,10 +1,10 @@
-# OSMnx Data Scraper
+# OSMnx Data Scraper — Site Scraper
 
-Extracts commercial establishment data from OpenStreetMap and assembles it into a single ML-ready CSV. Supports scraping multiple city neighborhoods in a single pipeline run.
+Extracts commercial establishment data from OpenStreetMap for NYC neighborhoods and assembles it into ML-ready CSVs. Two interfaces: an interactive Flask web app and a Jupyter notebook pipeline.
 
 ---
 
-## Setup
+## Quick start
 
 **Requirements:** Python 3.11, Windows
 
@@ -12,34 +12,42 @@ Extracts commercial establishment data from OpenStreetMap and assembles it into 
 # 1. Allow script execution (once per session)
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned
 
-# 2. Run setup — creates .venv, installs dependencies, registers Jupyter kernel
+# 2. Run setup — creates .venv, installs all dependencies, registers Jupyter kernel
 .\setup.ps1
 ```
 
-Then in VS Code, select the kernel **OSMnx Scraper (Python 3.11)** for all notebooks.
+> If you get a `.venv` error on first run, delete the `.venv` folder and re-run `setup.ps1`. This can happen if the project was cloned to a different drive than where the venv was originally created.
 
 ---
 
-## Running the pipeline
+## Option A — Flask web UI (recommended)
 
-Open `General-OSM-Scraper/00_orchestrator.ipynb` and run the cells in order:
+Double-click **`launch_site_scraper.bat`** or use the VS Code build task (`Ctrl+Shift+B`).
 
-| Cell | Action |
-|------|--------|
-| 1 | Imports |
-| 2 | Pipeline config — set `RUN_MODULE[nb] = False` to skip a step; loads `locations.json` |
-| 3 | Runs notebooks 01–05 for **each location** defined in `locations.json` |
-| 4 | Merges all per-location CSVs → `csv/combined_<RUN_ID>.csv` |
-| 5 | Preview of combined dataset (dtypes + first 10 rows) |
-| 6 | Column completeness report |
+Then open **http://localhost:5000** in your browser.
 
-> **Joker notebook (06):** Disabled by default (`INCLUDE_JOKER = False`). Set to `True` to include median income data from the US Census Bureau API — slow, skip if not needed.
+Features:
+- Add locations by clicking the map or entering coordinates
+- Select which notebooks to run (core steps 01-06, plus enrichment steps 07-13)
+- Real-time pipeline progress per site
+- CSV browser with pagination and column completeness view
+- Walking route visualization via OSMnx
+- Session export/import
+- OSM tag configuration
 
 ---
 
-## Multi-location scraping
+## Option B — Notebook pipeline directly
 
-Locations are defined in `General-OSM-Scraper/locations.json`. Add, remove, or modify entries to control which neighborhoods are scraped in each run.
+Open `General-OSM-Scraper/00_orchestrator.ipynb` and run cells in order using the **OSMnx Scraper (Python 3.11)** kernel.
+
+The orchestrator loops over locations in `locations.json`, runs notebooks 01-13 per location via papermill, and merges all outputs into `csv/combined_<RUN_ID>.csv`.
+
+---
+
+## Adding locations
+
+Edit `General-OSM-Scraper/locations.json`:
 
 ```json
 [
@@ -49,20 +57,38 @@ Locations are defined in `General-OSM-Scraper/locations.json`. Add, remove, or m
         "lon": -73.9851,
         "walk_minutes": 15.0,
         "walk_speed_m_min": 80.0
-    },
-    {
-        "name": "upper__east_side",
-        "lat": 40.7735,
-        "lon": -73.9565,
-        "walk_minutes": 20.0,
-        "walk_speed_m_min": 80.0
     }
 ]
 ```
 
-Each location generates its own intermediate CSV. All locations are combined at the end into a single `combined_<RUN_ID>.csv` with a `location` column identifying the source neighborhood.
-
 **Current locations:** Times Square, Upper East Side, Harlem, Lower East Side
+
+---
+
+## Notebooks
+
+```
+General-OSM-Scraper/
+├── 00_orchestrator.ipynb       <- start here; loops over all locations
+├── 01_identifiers.ipynb        <- fetches shops from OSM (Overpass API)
+├── 02_y_target.ipynb           <- amenity label classification
+├── 03_morphological.ipynb      <- street width + plot area (needs PLUTO)
+├── 04_synergistic_proximity.ipynb  <- distances to bus, hospital, school, park
+├── 05_socioeconomic.ipynb      <- residential/commercial building ratios (needs PLUTO)
+├── 06_census_income.ipynb      <- median income via TigerWeb + Census API
+├── 07_rent_proxy.ipynb         <- assessed value per sqft from PLUTO (needs PLUTO)
+├── 08_building_age.ipynb       <- year built from PLUTO (needs PLUTO)
+├── 09_foot_traffic.ipynb       <- pedestrian demand rank (needs pedestrian data)
+├── 10_subway_distance.ipynb    <- haversine distance to nearest subway entrance
+├── 11_shop_density.ipynb       <- shop count within 100m radius (BallTree)
+├── 12_population_density.ipynb <- Census tract population via ACS-5 + Tiger API
+├── 13_shop_type_mix.ipynb      <- Shannon entropy of label distribution within 200m
+├── locations.json              <- neighborhoods to scrape
+└── csv/                        <- per-location intermediates + combined output
+```
+
+Notebooks 03, 05, 07, 08 require NYC PLUTO tax-lot data (`ramy/NYC_pluto_25v4_csv/`) — auto-skipped if absent.
+Notebook 09 requires NYC Pedestrian Mobility Plan data (`ramy/pedestrian_mobility/`) — auto-skipped if absent.
 
 ---
 
@@ -74,42 +100,58 @@ Each location generates its own intermediate CSV. All locations are combined at 
 | Identifiers | `osm_id`, `lat`, `lon`, `distance_m` |
 | Y-target | `label` |
 | Morphological | `highway_type`, `lanes`, `lot_area_sqft` |
-| Synergistic proximity | `dist_bus_stop_m`, `dist_hospital_m`, `dist_school_m`, `dist_park_m` |
+| Proximity | `dist_bus_stop_m`, `dist_hospital_m`, `dist_school_m`, `dist_park_m` |
 | Socioeconomic | `com_ratio`, `res_ratio` |
-| Joker *(optional)* | `median_income` |
+| Census | `median_income`, `population_density` |
+| PLUTO-derived | `rent_proxy_per_sqft`, `year_built` |
+| Foot traffic | `pedestrian_demand_rank` |
+| Subway | `dist_subway_m` |
+| Density | `shop_density_100m`, `shop_type_entropy_200m` |
 
 ---
 
-## Notebooks
+## ML Visualization
+
+`ML_Plot/NYC_classification.ipynb` runs logistic regression and XGBoost on the combined CSV, generating plots to `ML_Plot/outputs/latest/`. Auto-detects the latest `combined_*.csv` — no hardcoded path needed.
+
+---
+
+## Project structure
 
 ```
-General-OSM-Scraper/
-├── 00_orchestrator.ipynb           ← start here; loops over all locations
-├── 01_identifiers.ipynb            ← fetches shops from OSM (Overpass API)
-├── 02_y_target.ipynb               ← amenity label classification
-├── 03_morphological.ipynb          ← street width (highway type, lanes) + plot area
-├── 04_synergistic_proximity.ipynb  ← distances to bus stops, hospitals, schools, parks
-├── 05_socioeconomic.ipynb          ← residential / commercial building ratios
-├── 06_joker.ipynb                  ← median income (US Census Bureau API) — optional
-├── locations.json                  ← list of neighborhoods to scrape
-└── csv/                            ← per-location intermediates + combined output
+OSMnx-data-scraper/
+├── General-OSM-Scraper/        <- notebook pipeline
+├── Site_Scraper_App/           <- Flask web UI
+│   ├── Site_Scraper_App.py     <- backend (~1100 lines, 40+ endpoints)
+│   ├── static/app.js           <- frontend (vanilla JS + Leaflet)
+│   └── templates/index.html
+├── ML_Plot/                    <- ML classification + plots
+├── launch_site_scraper.bat     <- launches the web UI
+├── setup.ps1                   <- one-time environment setup
+└── requirements.txt            <- all Python dependencies
 ```
 
 ---
 
 ## Changelog
 
+### 2026-05-10 — Fix setup and missing dependencies
+- Rebuilt `.venv` after project moved from E: to C: drive (old venv was corrupted)
+- Added `flask`, `papermill`, `xgboost`, `matplotlib` to `requirements.txt` (were missing)
+- Fixed `setup.ps1` encoding issue (smart quotes broke PowerShell parser)
+- Updated `setup.ps1` next-steps instructions to reference current app entry points
+
+### 2026-05-07 — Notebooks 07-13 + enrichment timeline UI
+- Added notebooks 07-13 (rent proxy, building age, foot traffic, subway distance, shop density, population density, shop type mix)
+- Flask UI groups notebooks 07-13 under a single "Enrichment" toggle with dot-based mini-timeline
+- Cached TigerWeb census tract centroids (`cache/tract_centroids.json`)
+
 ### 2026-05-04 — Multi-location pipeline + column cleanup
-- Added `locations.json` to define multiple neighborhoods as scrape targets
-- Orchestrator now iterates over all locations, running the full pipeline per location
-- All per-location outputs are merged into a single `combined_<RUN_ID>.csv` with a `location` column
-- Removed unused / redundant columns from the final CSV output
-- Updated morphological notebook (03) and socioeconomic notebook (05) for consistency with new schema
-- `INCLUDE_JOKER` flag added to orchestrator to skip the slow median-income step (default: `False`)
-- Added column completeness report cell to orchestrator
+- Added `locations.json` for multi-neighborhood scraping
+- Orchestrator iterates all locations, merges into `combined_<RUN_ID>.csv` with `location` column
+- Removed unused/redundant columns from final CSV
 
 ### 2026-05-01 — Pipeline V01
-- Initial end-to-end pipeline wiring via `00_orchestrator.ipynb`
-- Versioned CSV output: `final_dataset_v001_<YYYY-MM-DD_HH-MM-SS>.csv`
-- `.gitignore` updated to exclude intermediate and final CSV files
-- PLUTO data removed from pipeline scope
+- Initial end-to-end pipeline via `00_orchestrator.ipynb`
+- Versioned CSV output
+- `.gitignore` excludes intermediate and final CSV files

@@ -1,5 +1,5 @@
 # =============================================================
-#  OSMnx Data Scraper — One-time environment setup
+#  OSMnx Data Scraper - One-time environment setup
 #  Run this script once from the project folder:
 #
 #      Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned
@@ -9,7 +9,7 @@
 
 Write-Host ""
 Write-Host "=======================================" -ForegroundColor Cyan
-Write-Host "  OSMnx Data Scraper — Environment Setup" -ForegroundColor Cyan
+Write-Host "  OSMnx Data Scraper - Environment Setup" -ForegroundColor Cyan
 Write-Host "=======================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -54,9 +54,13 @@ Write-Host "  Setup complete!" -ForegroundColor Green
 Write-Host "=======================================" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "Next steps:" -ForegroundColor White
-Write-Host "  1. Open  osm_commercial_fetch.ipynb  in VS Code" -ForegroundColor White
-Write-Host "  2. Select kernel: Ctrl+Shift+P -> 'Notebook: Select Notebook Kernel'" -ForegroundColor White
-Write-Host "     Pick: OSMnx Scraper (Python 3.11)" -ForegroundColor White
-Write-Host "  3. Edit Cell 3 (Parameters) with your coordinates" -ForegroundColor White
-Write-Host "  4. Run All Cells (Ctrl+Shift+P -> 'Notebook: Run All')" -ForegroundColor White
+Write-Host "  Option A - Flask web UI:" -ForegroundColor White
+Write-Host "    Double-click launch_site_scraper.bat" -ForegroundColor White
+Write-Host "    Then open http://localhost:5000 in your browser" -ForegroundColor White
+Write-Host ""
+Write-Host "  Option B - Notebook pipeline directly:" -ForegroundColor White
+Write-Host "    Open General-OSM-Scraper/00_orchestrator.ipynb in VS Code" -ForegroundColor White
+Write-Host "    Select kernel: OSMnx Scraper (Python 3.11)" -ForegroundColor White
+Write-Host "    Edit locations.json with your target neighborhoods" -ForegroundColor White
+Write-Host "    Run All Cells" -ForegroundColor White
 Write-Host ""
