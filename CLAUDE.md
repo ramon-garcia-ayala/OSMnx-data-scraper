@@ -46,6 +46,31 @@ Key backend features: pipeline orchestration, CSV management with pagination, OS
 
 The Flask UI registers all notebooks 01–13. Notebooks 01–06 are "core" and shown as individual checkboxes and large step indicators. Notebooks 07–13 are tagged `group: "enrichment"` and appear in the UI as a single toggle ("Enrichment") with a subtle dot-based mini-timeline in site cards. Dependency auto-skip applies to both: `needs_pluto` (03, 05, 07, 08) and `needs_pedestrian` (09).
 
+### Zone Finding Pipeline (`Zone-Finding/`)
+
+Predicts urban zone types (Residential, Commercial, Mixed-Use, Industrial, Institutional, Open Space) for Manhattan census tracts (~310) using a classification model trained on PLUTO + OSM + Census features.
+
+The orchestrator (`00_orchestrator.ipynb`) runs notebooks 01–09 via papermill, merges CSVs on `tract_id`, then runs the ML notebook (10). Configuration lives in `zones.json`.
+
+Notebook responsibilities:
+- **01** — Zone definition: derives Y variable (`zone_type`) from PLUTO `landuse` via area-weighted aggregation per census tract (`bct2020`)
+- **02** — Amenity composition: counts/ratios of OSM amenity categories per tract (Overpass API)
+- **03** — Building characteristics: avg floors, year built, lot area from PLUTO (`needs_pluto`)
+- **04** — Land use mix: Shannon entropy + HHI of landuse distribution (`needs_pluto`). No raw area ratios (prevents Y leakage)
+- **05** — Accessibility: subway/bus distances, transit stop count, intersection density (OSM + OSMnx)
+- **06** — Socioeconomic: median income, population density, poverty rate (Census ACS-5 API, direct tract FIPS join)
+- **07** — Tourism intensity: hotel count, tourism POI count/density/ratio (Overpass API)
+- **08** — Pedestrian activity: pedestrian rank from NYC Pedestrian Mobility Plan (`needs_pedestrian`)
+- **09** — Commercial density: shop count, density, type entropy, brand ratio (Overpass API)
+- **10** — ML classification: Logistic Regression, Random Forest, XGBoost with spatial CV (GroupKFold)
+
+Feature strategy (no data overlap): PLUTO for building/land features, OSM for amenities/transit/tourism, Census for socioeconomic. PLUTO area ratios excluded to prevent Y variable leakage.
+
+Data flow:
+```
+zones.json → 00_orchestrator → papermill(01..09) → per-notebook CSVs → combined_zones CSV → 10_ml_classification
+```
+
 ### ML Visualization (`ML_Plot/`)
 
 `NYC_classification.ipynb` runs logistic regression and XGBoost on the combined CSV, generating plots to `outputs/latest/`. It auto-detects the latest `combined_*.csv` — no hardcoded path needed.
@@ -68,3 +93,6 @@ locations.json → 00_orchestrator → papermill(01..13) → per-site CSVs → c
 - The `cache/` directories store Overpass API responses to avoid redundant network calls.
 - `cache/tract_centroids.json` is a shared cache of TigerWeb census tract centroids used by notebooks 06 and 12. First run fetches ~2000 centroids in parallel; subsequent runs are instant.
 - Notebooks are JSON — when editing f-strings, always use explicit `\n` escapes, never literal newlines inside strings (they produce `SyntaxError: unterminated string literal`).
+- Zone-Finding notebooks 03, 04 depend on PLUTO (`needs_pluto` flag in `zones.json`). Notebook 08 depends on Pedestrian Mobility data (`needs_pedestrian`). Both auto-skip with NaN-filled CSVs if data is absent.
+- Zone-Finding CSV outputs go to `Zone-Finding/csv/` and are gitignored. The `cache/` directory stores Overpass API responses.
+- Zone-Finding is fully independent from General-OSM-Scraper — no shared code or utilities.
