@@ -49,7 +49,7 @@ The Flask UI registers all notebooks 01–13. Notebooks 01–06 are "core" and s
 
 ### Zone Finding Pipeline (`Zone-Finding/`)
 
-Predicts urban zone types (Residential, Commercial, Mixed-Use, Industrial, Institutional, Open Space) for Manhattan census tracts (~310) using a classification model trained on PLUTO + OSM + Census features.
+Predicts urban zone types for Manhattan census tracts (~310) using a classification model trained on PLUTO + OSM + Census features. The raw PLUTO landuse produces 5 zone types (Residential, Commercial, Mixed-Use, Institutional, Open Space); notebook 10 merges these into 3 classes for ML: **Commercial** (35), **Residential** (238, includes Mixed-Use), **Other** (36, includes Institutional + Open Space).
 
 The orchestrator (`00_orchestrator.ipynb`) runs notebooks 01–09 via papermill, merges CSVs on `tract_id`, then runs the ML notebook (10). Configuration lives in `zones.json`.
 
@@ -63,7 +63,7 @@ Notebook responsibilities:
 - **07** — Tourism intensity: hotel count, tourism POI count/density/ratio (single batch Overpass query + BallTree)
 - **08** — Pedestrian activity: pedestrian rank from NYC Pedestrian Mobility Plan (`needs_pedestrian`). Vectorized regex extraction.
 - **09** — Commercial density: shop count, density, type entropy, brand ratio (single batch Overpass query + BallTree)
-- **10** — ML classification: Logistic Regression, Random Forest, XGBoost with spatial CV (GroupKFold)
+- **10** — ML classification: Logistic Regression, Random Forest, XGBoost with stratified train/test split. Merges 5 zone types → 3 classes (Commercial, Residential, Other). Feature selection reduces ~40 columns to 11 features with proven signal: amenity_density, shop_density_km2, shop_type_entropy, brand_ratio, tourism_density, landuse_entropy, amenity_ratio_food_drink, avg_floors, avg_yearbuilt, building_count, total_bldg_area. Drops non-discriminating features (subway/bus distances, pedestrian rank, intersection density) and redundant features (correlated pairs).
 
 Feature strategy (no data overlap): PLUTO for building/land features, OSM for amenities/transit/tourism, Census for socioeconomic. PLUTO area ratios excluded to prevent Y variable leakage.
 
