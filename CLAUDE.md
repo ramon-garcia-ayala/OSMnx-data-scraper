@@ -95,11 +95,11 @@ Grid-based version of Zone-Finding. Replaces irregular census tracts with a **re
 - **`MIN_LOTS_PER_CELL`**: minimum PLUTO lots for a cell to be valid (default 3)
 - **`INCLUDE_OTHER`**: `False` = binary (Commercial vs Residential), `True` = 3-class (+ Other)
 
-The orchestrator writes `grid.json` from these parameters before running. Cell counts vary by borough: Manhattan ~1,810, Brooklyn ~4,500+, Queens ~6,000+, Bronx ~2,500+, Staten Island ~2,000+ (at 150m).
+Cell counts vary by borough: Manhattan ~1,810, Brooklyn ~4,500+, Queens ~6,000+, Bronx ~2,500+, Staten Island ~2,000+ (at 150m).
 
 Leaner pipeline: only 9 notebooks, only the 11 proven features are computed (no redundant/noise columns). Skips accessibility (05), socioeconomic (06), and pedestrian (08) notebooks entirely since all their features were noise.
 
-The orchestrator (`00_orchestrator.ipynb`) runs notebooks 01–06 via papermill, merges CSVs on `cell_id`, then runs ML (07), heatmap (08), and comparison (09). Each run creates timestamped folders: `csv/{borough}_{YYYY-MM-DD}_{HH}h{MM}/` and `outputs/{borough}_{YYYY-MM-DD}_{HH}h{MM}/` (e.g. `csv/Manhattan_2026-05-15_14h30/`). This preserves a history of runs per borough.
+The orchestrator (`00_orchestrator.ipynb`) **loops over each borough independently**: for each one it writes `grid.json`, runs notebooks 01–06, merges CSVs, then runs ML (07) and heatmap (08). Each borough gets its own timestamped folder: `csv/{Borough}_{YYYY-MM-DD}_{HH}h{MM}/` and `outputs/{Borough}_{YYYY-MM-DD}_{HH}h{MM}/` (e.g. `csv/Manhattan_2026-05-15_14h30/`). After all boroughs finish, comparison (09) runs if 2+ unique boroughs exist.
 
 Notebook responsibilities:
 - **01** — Grid definition: generates 150m grid, clips to PLUTO convex hull, assigns lots to cells, derives zone_type via area-weighted landuse aggregation
@@ -114,7 +114,10 @@ Notebook responsibilities:
 
 Data flow:
 ```
-grid.json → 00_orchestrator → papermill(01..06) → per-notebook CSVs → combined_grid CSV → 07_ml → 08_heatmap → 09_comparison (if 2+ boroughs)
+For each borough in BOROUGH:
+  grid.json → papermill(01..06) → per-notebook CSVs → combined_grid.csv → 07_ml → 08_heatmap
+After all boroughs:
+  09_comparison (if 2+ unique boroughs)
 ```
 
 ### ML Visualization (`ML_Plot/`)

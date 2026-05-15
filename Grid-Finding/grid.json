@@ -1,5 +1,11 @@
 {
-    "borough_filter": ["MN"],
+    "borough_filter": [
+        "MN",
+        "BK",
+        "QN",
+        "BX",
+        "SI"
+    ],
     "borough_codes": {
         "MN": 1,
         "BX": 2,
@@ -11,15 +17,36 @@
     "min_lots_per_cell": 3,
     "pluto_path": "../ramy/NYC_pluto_25v4_csv/pluto_25v4.csv",
     "include_other": false,
+    "csv_dir": "csv/Manhattan_Brooklyn_Queens_Bronx_Staten Island_2026-05-15_09h42",
     "feature_flags": {
         "needs_pluto": true
     },
     "zone_type_rules": {
-        "Residential": {"landuse": "01", "threshold": 0.70},
-        "Commercial": {"landuse": "02", "threshold": 0.50},
-        "Industrial": {"landuse": "05", "threshold": 0.30},
-        "Institutional": {"landuse": "08", "threshold": 0.30},
-        "Open Space": {"landuse": ["09", "11"], "threshold": 0.30},
-        "Mixed-Use": {"description": "No single category dominates"}
+        "Residential": {
+            "landuse": "01",
+            "threshold": 0.7
+        },
+        "Commercial": {
+            "landuse": "02",
+            "threshold": 0.5
+        },
+        "Industrial": {
+            "landuse": "05",
+            "threshold": 0.3
+        },
+        "Institutional": {
+            "landuse": "08",
+            "threshold": 0.3
+        },
+        "Open Space": {
+            "landuse": [
+                "09",
+                "11"
+            ],
+            "threshold": 0.3
+        },
+        "Mixed-Use": {
+            "description": "No single category dominates"
+        }
     }
 }
