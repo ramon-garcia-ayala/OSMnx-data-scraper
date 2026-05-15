@@ -17,6 +17,7 @@ If `.venv` exists but is missing `Scripts/` and `Lib/`, it was created on a diff
 - **Flask web UI:** `launch_site_scraper.bat` or VS Code build task (Ctrl+Shift+B). Runs on http://localhost:5000.
 - **Notebook pipeline directly:** Run `General-OSM-Scraper/00_orchestrator.ipynb` cells in order using the "OSMnx Scraper (Python 3.11)" kernel.
 - **Zone Finding pipeline:** Run `Zone-Finding/00_orchestrator.ipynb` cells in order. First run takes ~5–10 min (batch Overpass API queries); subsequent runs ~2–3 min (cached). All OSM notebooks (02, 05, 07, 09) use single batch bbox queries + BallTree matching instead of per-tract queries.
+- **Grid Finding pipeline:** Run `Grid-Finding/00_orchestrator.ipynb` cells in order. Same batch Overpass + BallTree pattern as Zone-Finding but with 150m grid cells instead of census tracts (~1,810 cells). Produces heatmap visualization. First run ~5–10 min; subsequent runs ~2–3 min (cached).
 
 There are no tests, linters, or CI configured.
 
@@ -51,7 +52,7 @@ The Flask UI registers all notebooks 01–13. Notebooks 01–06 are "core" and s
 
 ### Zone Finding Pipeline (`Zone-Finding/`)
 
-Predicts urban zone types for Manhattan census tracts (~310) using a classification model trained on PLUTO + OSM + Census features. The raw PLUTO landuse produces 5 zone types (Residential, Commercial, Mixed-Use, Institutional, Open Space); notebook 10 merges these into 3 classes for ML: **Commercial** (35), **Residential** (238, includes Mixed-Use), **Other** (36, includes Institutional + Open Space).
+Predicts urban zone types for Manhattan census tracts (~310) using a classification model trained on PLUTO + OSM + Census features. The raw PLUTO landuse produces 5 zone types (Residential, Commercial, Mixed-Use, Institutional, Open Space); notebook 10 merges to 2 classes for binary classification: **Commercial** (~35) and **Residential** (~238, includes Mixed-Use). Other tracts (Institutional + Open Space) are dropped — too noisy with insufficient OSM signal to distinguish from Residential.
 
 The orchestrator (`00_orchestrator.ipynb`) runs notebooks 01–09 via papermill, merges CSVs on `tract_id`, then runs the ML notebook (10). Configuration lives in `zones.json`.
 
@@ -65,13 +66,47 @@ Notebook responsibilities:
 - **07** — Tourism intensity: hotel count, tourism POI count/density/ratio (single batch Overpass query + BallTree)
 - **08** — Pedestrian activity: pedestrian rank from NYC Pedestrian Mobility Plan (`needs_pedestrian`). Vectorized regex extraction.
 - **09** — Commercial density: shop count, density, type entropy, brand ratio (single batch Overpass query + BallTree)
-- **10** — ML classification: Logistic Regression, Random Forest, XGBoost with stratified train/test split. Merges 5 zone types → 3 classes (Commercial, Residential, Other). Feature selection reduces ~40 columns to 11 features with proven signal: amenity_density, shop_density_km2, shop_type_entropy, brand_ratio, tourism_density, landuse_entropy, amenity_ratio_food_drink, avg_floors, avg_yearbuilt, building_count, total_bldg_area. Drops non-discriminating features (subway/bus distances, pedestrian rank, intersection density) and redundant features (correlated pairs).
+- **10** — ML classification: Logistic Regression, Random Forest, XGBoost with stratified train/test split. Binary classification: Commercial vs Residential (Other tracts dropped). Feature selection reduces ~40 columns to 11 features with proven signal: amenity_density, shop_density_km2, shop_type_entropy, brand_ratio, tourism_density, landuse_entropy, amenity_ratio_food_drink, avg_floors, avg_yearbuilt, building_count, total_bldg_area. Drops non-discriminating features (subway/bus distances, pedestrian rank, intersection density) and redundant features (correlated pairs).
 
 Feature strategy (no data overlap): PLUTO for building/land features, OSM for amenities/transit/tourism, Census for socioeconomic. PLUTO area ratios excluded to prevent Y variable leakage.
+
+Dropped features (no discriminating power in Manhattan — identical distributions across classes):
+- `dist_subway_mean`, `dist_bus_mean` — subway/bus coverage too uniform across Manhattan
+- `pedestrian_rank_mean`, `pedestrian_rank_max`, `pct_high_traffic_segments` — high foot traffic in both commercial and residential areas
+- `intersection_density`, `transit_stop_count` — flat across all zone types
+
+Dropped features (redundant — high correlation with kept features):
+- `amenity_count_total` (r=1.00 with amenity_density), `amenity_count_food_drink`, `amenity_count_retail`, `amenity_count_services`, `amenity_count_office`, `amenity_count_hotel`, `amenity_count_entertainment`, `amenity_count_education`, `amenity_count_healthcare` — raw counts redundant with density/ratio
+- `amenity_ratio_retail`, `amenity_ratio_services`, `amenity_ratio_office`, `amenity_ratio_hotel`, `amenity_ratio_entertainment`, `amenity_ratio_education`, `amenity_ratio_healthcare` — only food_drink ratio kept (strongest signal)
+- `shop_count` (r=0.91 with shop_density_km2), `hotel_count` (r=0.96 with tourism_density), `tourism_poi_count`, `tourism_ratio` — density versions kept
+- `lot_area_mean`, `landuse_hhi` (r=-0.92 with landuse_entropy) — redundant with kept features
 
 Data flow:
 ```
 zones.json → 00_orchestrator → papermill(01..09) → per-notebook CSVs → combined_zones CSV → 10_ml_classification
+```
+
+### Grid Finding Pipeline (`Grid-Finding/`)
+
+Grid-based version of Zone-Finding. Replaces irregular census tracts with a **150m x 150m regular grid** over Manhattan (~1,810 cells). Binary classification: **Commercial** (~283) vs **Residential** (~1,348, includes Mixed-Use). Other zone types (Industrial, Institutional, Open Space) are dropped.
+
+Leaner pipeline: only 8 notebooks, only the 11 proven features are computed (no redundant/noise columns). Skips accessibility (05), socioeconomic (06), and pedestrian (08) notebooks entirely since all their features were noise.
+
+The orchestrator (`00_orchestrator.ipynb`) runs notebooks 01–06 via papermill, merges CSVs on `cell_id`, then runs ML (07) and heatmap (08). Configuration lives in `grid.json`.
+
+Notebook responsibilities:
+- **01** — Grid definition: generates 150m grid, clips to PLUTO convex hull, assigns lots to cells, derives zone_type via area-weighted landuse aggregation
+- **02** — Amenity composition: amenity_density + amenity_ratio_food_drink (single batch Overpass query + BallTree)
+- **03** — Building characteristics: avg_floors, avg_yearbuilt, building_count, total_bldg_area from PLUTO
+- **04** — Land use mix: landuse_entropy only (HHI dropped as redundant)
+- **05** — Tourism intensity: tourism_density only (single batch Overpass query + BallTree)
+- **06** — Commercial density: shop_density_km2, shop_type_entropy, brand_ratio (single batch Overpass query + BallTree)
+- **07** — ML classification: LR, XGBoost, RF with binary classification. Exports predictions CSV with prob_commercial for heatmap
+- **08** — Heatmap visualization: matplotlib static heatmap (blue=Residential, red=Commercial) + folium interactive Leaflet.js map
+
+Data flow:
+```
+grid.json → 00_orchestrator → papermill(01..06) → per-notebook CSVs → combined_grid CSV → 07_ml → 08_heatmap
 ```
 
 ### ML Visualization (`ML_Plot/`)
@@ -100,3 +135,8 @@ locations.json → 00_orchestrator → papermill(01..13) → per-site CSVs → c
 - Zone-Finding CSV outputs go to `Zone-Finding/csv/` and are gitignored. The `cache/` directory stores Overpass API responses as JSON files keyed by SHA1 of the query string. Cache persists across kernel restarts and machine reboots — only invalidated if query parameters change (e.g., different bbox or coordinates). Safe to delete `Zone-Finding/cache/` to force re-fetch from Overpass. Batch queries produce fewer, larger cache files than per-tract queries.
 - Zone-Finding is fully independent from General-OSM-Scraper — no shared code or utilities.
 - Zone-Finding combined CSV: ~310 rows (Manhattan census tracts) x ~35 feature columns. Unit of analysis is the census tract (`bct2020` from PLUTO), not individual POIs.
+- Grid-Finding is fully independent from both Zone-Finding and General-OSM-Scraper — no shared code.
+- Grid-Finding CSV outputs go to `Grid-Finding/csv/`, cache to `Grid-Finding/cache/`. Same Overpass cache strategy as Zone-Finding.
+- Grid-Finding combined CSV: ~1,810 rows (150m grid cells) x 16 columns (5 base + 11 features). Unit of analysis is a 150m x 150m grid cell. Portable to other boroughs by changing `borough_filter` in `grid.json`.
+- Grid-Finding notebooks 03, 04 depend on PLUTO (`needs_pluto` flag). OSM notebooks (02, 05, 06) work anywhere with Overpass API.
+- Grid-Finding heatmap (notebook 08) requires `folium` for interactive map. Static matplotlib heatmap always works.
