@@ -17,7 +17,7 @@ If `.venv` exists but is missing `Scripts/` and `Lib/`, it was created on a diff
 - **Flask web UI:** `launch_site_scraper.bat` or VS Code build task (Ctrl+Shift+B). Runs on http://localhost:5000.
 - **Notebook pipeline directly:** Run `General-OSM-Scraper/00_orchestrator.ipynb` cells in order using the "OSMnx Scraper (Python 3.11)" kernel.
 - **Zone Finding pipeline:** Run `Zone-Finding/00_orchestrator.ipynb` cells in order. First run takes ~5–10 min (batch Overpass API queries); subsequent runs ~2–3 min (cached). All OSM notebooks (02, 05, 07, 09) use single batch bbox queries + BallTree matching instead of per-tract queries.
-- **Grid Finding pipeline:** Run `Grid-Finding/00_orchestrator.ipynb` cells in order. Same batch Overpass + BallTree pattern as Zone-Finding but with 150m grid cells instead of census tracts (~1,810 cells). Produces heatmap visualization. First run ~5–10 min; subsequent runs ~2–3 min (cached).
+- **Grid Finding pipeline:** Run `Grid-Finding/00_orchestrator.ipynb` cells in order. Change `BOROUGH`, `CELL_SIZE_M`, and `INCLUDE_OTHER` in the first code cell to configure the run. Same batch Overpass + BallTree pattern as Zone-Finding but with a regular grid. Produces heatmap visualization. First run ~5–10 min; subsequent runs ~2–3 min (cached).
 
 There are no tests, linters, or CI configured.
 
@@ -88,11 +88,18 @@ zones.json → 00_orchestrator → papermill(01..09) → per-notebook CSVs → c
 
 ### Grid Finding Pipeline (`Grid-Finding/`)
 
-Grid-based version of Zone-Finding. Replaces irregular census tracts with a **150m x 150m regular grid** over Manhattan (~1,810 cells). Binary classification: **Commercial** (~283) vs **Residential** (~1,348, includes Mixed-Use). Other zone types (Institutional, Open Space, Industrial, Infrastructure) are dropped.
+Grid-based version of Zone-Finding. Replaces irregular census tracts with a **regular grid** (default 150m x 150m). Portable to any NYC borough — all parameters are configured in a single cell at the top of the orchestrator:
+
+- **`BOROUGH`**: `["MN"]` (Manhattan), `["BK"]` (Brooklyn), `["QN"]` (Queens), `["BX"]` (Bronx), `["SI"]` (Staten Island), or combinations like `["MN", "BK"]`
+- **`CELL_SIZE_M`**: grid cell size in meters (default 150)
+- **`MIN_LOTS_PER_CELL`**: minimum PLUTO lots for a cell to be valid (default 3)
+- **`INCLUDE_OTHER`**: `False` = binary (Commercial vs Residential), `True` = 3-class (+ Other)
+
+The orchestrator writes `grid.json` from these parameters before running. Cell counts vary by borough: Manhattan ~1,810, Brooklyn ~4,500+, Queens ~6,000+, Bronx ~2,500+, Staten Island ~2,000+ (at 150m).
 
 Leaner pipeline: only 8 notebooks, only the 11 proven features are computed (no redundant/noise columns). Skips accessibility (05), socioeconomic (06), and pedestrian (08) notebooks entirely since all their features were noise.
 
-The orchestrator (`00_orchestrator.ipynb`) runs notebooks 01–06 via papermill, merges CSVs on `cell_id`, then runs ML (07) and heatmap (08). Configuration lives in `grid.json`.
+The orchestrator (`00_orchestrator.ipynb`) runs notebooks 01–06 via papermill, merges CSVs on `cell_id`, then runs ML (07) and heatmap (08).
 
 Notebook responsibilities:
 - **01** — Grid definition: generates 150m grid, clips to PLUTO convex hull, assigns lots to cells, derives zone_type via area-weighted landuse aggregation
