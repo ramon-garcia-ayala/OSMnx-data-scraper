@@ -1,10 +1,12 @@
-# OSMnx Data Scraper — Site Scraper
+# OSMnx Data Scraper — Urban Zone Classification
 
-Extracts commercial establishment data from OpenStreetMap for NYC neighborhoods and assembles it into ML-ready CSVs. Two interfaces: an interactive Flask web app and a Jupyter notebook pipeline.
+Predicts **Commercial vs Residential** zones across NYC boroughs using OpenStreetMap + PLUTO data on a regular 150m grid. Trains Logistic Regression, XGBoost, and Random Forest on 11 features extracted per grid cell. Produces heatmap visualizations and cross-borough comparison analysis.
+
+![Combined borough heatmap](Grid-Finding/outputs/Comparison/02_combined_map.png)
 
 ---
 
-## Quick start
+## Setup
 
 **Requirements:** Python 3.11, Windows
 
@@ -16,103 +18,147 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned
 .\setup.ps1
 ```
 
-> If you get a `.venv` error on first run, delete the `.venv` folder and re-run `setup.ps1`. This can happen if the project was cloned to a different drive than where the venv was originally created.
+> If `.venv` exists but is broken (missing `Scripts/` or `Lib/`), delete it and re-run `setup.ps1`.
 
 ---
 
-## Option A — Flask web UI (recommended)
+## Grid Finding Pipeline (recommended)
 
-Double-click **`launch_site_scraper.bat`** or use the VS Code build task (`Ctrl+Shift+B`).
+The main pipeline. Overlays a regular grid on any NYC borough, extracts urban features per cell, and classifies each cell as Commercial or Residential.
 
-Then open **http://localhost:5000** in your browser.
+### Quick start
 
-Features:
-- Add locations by clicking the map or entering coordinates
-- Select which notebooks to run (core steps 01-06, plus enrichment steps 07-13)
-- Real-time pipeline progress per site
-- CSV browser with pagination and column completeness view
-- Walking route visualization via OSMnx
-- Session export/import
-- OSM tag configuration
+1. Open `Grid-Finding/00_orchestrator.ipynb` in VS Code or Jupyter
+2. Select kernel: **OSMnx Scraper (Python 3.11)**
+3. Edit the parameters in the first code cell
+4. **Restart kernel** and **Run All Cells**
 
----
+First run takes ~5-10 min per borough (Overpass API queries are cached). Subsequent runs ~2-3 min.
 
-## Option B — Notebook pipeline directly
+### Parameters
 
-Open `General-OSM-Scraper/00_orchestrator.ipynb` and run cells in order using the **OSMnx Scraper (Python 3.11)** kernel.
+All parameters are in the **first code cell** of the orchestrator:
 
-The orchestrator loops over locations in `locations.json`, runs notebooks 01-13 per location via papermill, and merges all outputs into `csv/combined_<RUN_ID>.csv`.
-
----
-
-## Adding locations
-
-Edit `General-OSM-Scraper/locations.json`:
-
-```json
-[
-    {
-        "name": "times_square",
-        "lat": 40.7589,
-        "lon": -73.9851,
-        "walk_minutes": 15.0,
-        "walk_speed_m_min": 80.0
-    }
-]
+```python
+BOROUGH = ["MN"]              # Which boroughs to analyze (see catalog below)
+CELL_SIZE_M = 150             # Grid cell size in meters
+MIN_LOTS_PER_CELL = 3         # Minimum PLUTO lots per cell (noise filter)
+INCLUDE_OTHER = False         # False = binary, True = 3-class (+ Other)
+PLUTO_PATH = "../ramy/NYC_pluto_25v4_csv/pluto_25v4.csv"
 ```
 
-**Current locations:** Times Square, Upper East Side, Harlem, Lower East Side
+**Borough catalog:**
 
----
+| Code | Borough | Estimated cells (150m) |
+|------|---------|----------------------|
+| `"MN"` | Manhattan | ~1,810 |
+| `"BK"` | Brooklyn | ~4,500+ |
+| `"QN"` | Queens | ~6,000+ |
+| `"BX"` | Bronx | ~2,500+ |
+| `"SI"` | Staten Island | ~2,000+ |
 
-## Notebooks
+Run multiple boroughs at once: `BOROUGH = ["MN", "BK", "QN"]`. Each borough runs independently with its own timestamped output folder.
+
+### How it works
+
+The orchestrator loops over each borough and runs the full pipeline independently:
 
 ```
-General-OSM-Scraper/
-├── 00_orchestrator.ipynb       <- start here; loops over all locations
-├── 01_identifiers.ipynb        <- fetches shops from OSM (Overpass API)
-├── 02_y_target.ipynb           <- amenity label classification
-├── 03_morphological.ipynb      <- street width + plot area (needs PLUTO)
-├── 04_synergistic_proximity.ipynb  <- distances to bus, hospital, school, park
-├── 05_socioeconomic.ipynb      <- residential/commercial building ratios (needs PLUTO)
-├── 06_census_income.ipynb      <- median income via TigerWeb + Census API
-├── 07_rent_proxy.ipynb         <- assessed value per sqft from PLUTO (needs PLUTO)
-├── 08_building_age.ipynb       <- year built from PLUTO (needs PLUTO)
-├── 09_foot_traffic.ipynb       <- pedestrian demand rank (needs pedestrian data)
-├── 10_subway_distance.ipynb    <- haversine distance to nearest subway entrance
-├── 11_shop_density.ipynb       <- shop count within 100m radius (BallTree)
-├── 12_population_density.ipynb <- Census tract population via ACS-5 + Tiger API
-├── 13_shop_type_mix.ipynb      <- Shannon entropy of label distribution within 200m
-├── locations.json              <- neighborhoods to scrape
-└── csv/                        <- per-location intermediates + combined output
+For each borough:
+  01  Grid Definition          generate 150m grid, assign PLUTO lots, derive zone_type (Y)
+  02  Amenity Composition      amenity density + food/drink ratio (OSM Overpass)
+  03  Building Characteristics avg floors, year built, building count, area (PLUTO)
+  04  Land Use Mix             Shannon entropy of landuse distribution (PLUTO)
+  05  Tourism Intensity        tourism POI density (OSM Overpass)
+  06  Commercial Density       shop density, type entropy, brand ratio (OSM Overpass)
+  ──────────────────────────────────────────────────────────────
+  07  ML Classification        train LR, XGBoost, RF → export predictions
+  08  Heatmap Visualization    static + interactive maps with basemap
+
+After all boroughs:
+  09  Borough Comparison       cross-borough charts, combined map, side-by-side plots
 ```
 
-Notebooks 03, 05, 07, 08 require NYC PLUTO tax-lot data (`ramy/NYC_pluto_25v4_csv/`) — auto-skipped if absent.
-Notebook 09 requires NYC Pedestrian Mobility Plan data (`ramy/pedestrian_mobility/`) — auto-skipped if absent.
+### Features (11 columns)
+
+| Feature | Source | Description |
+|---------|--------|-------------|
+| `amenity_density` | OSM | Amenities per km2 |
+| `amenity_ratio_food_drink` | OSM | Proportion of food/drink amenities |
+| `shop_density_km2` | OSM | Shops per km2 |
+| `shop_type_entropy` | OSM | Shannon diversity of shop types |
+| `brand_ratio` | OSM | Fraction of shops with a brand tag |
+| `tourism_density` | OSM | Tourism POIs per km2 |
+| `landuse_entropy` | PLUTO | Shannon entropy of landuse categories |
+| `avg_floors` | PLUTO | Mean number of floors |
+| `avg_yearbuilt` | PLUTO | Mean construction year |
+| `building_count` | PLUTO | Number of buildings in cell |
+| `total_bldg_area` | PLUTO | Total building area (sqft) |
+
+### Output structure
+
+Each run creates timestamped folders per borough:
+
+```
+Grid-Finding/
+├── csv/
+│   ├── Manhattan_2026-05-15_14h30/
+│   │   ├── 01_grid_definition.csv      (intermediate, gitignored)
+│   │   ├── 02_amenity_composition.csv   (intermediate, gitignored)
+│   │   ├── ...
+│   │   ├── combined_grid.csv            (tracked in git)
+│   │   └── 07_predictions.csv           (intermediate, gitignored)
+│   └── Brooklyn_2026-05-15_14h30/
+│       └── ...
+├── outputs/
+│   ├── Manhattan_2026-05-15_14h30/
+│   │   ├── 01_countplot_zone_type.png
+│   │   ├── 02_feature_boxplots.png
+│   │   ├── 03_correlation_heatmap.png
+│   │   ├── 04_confusion_matrix_lr.png
+│   │   ├── 05_confusion_matrix_xgb.png
+│   │   ├── 06_confusion_matrix_rf.png
+│   │   ├── 07_feature_importance_rf.png
+│   │   ├── 08_heatmap_predictions.png
+│   │   ├── 08_heatmap_interactive.html
+│   │   └── 09_summary_dashboard.png
+│   ├── Brooklyn_2026-05-15_14h30/
+│   │   └── ...
+│   └── Comparison/
+│       ├── 01_borough_comparison.png
+│       ├── 02_combined_map.png
+│       ├── 02_combined_map_interactive.html
+│       ├── 03_heatmaps_side_by_side.png
+│       ├── 04_dashboards_side_by_side.png
+│       └── 05_feature_comparison.png
+└── cache/                               (Overpass API cache, gitignored)
+```
+
+### Classification modes
+
+- **Binary** (`INCLUDE_OTHER = False`): Commercial vs Residential. Heatmap uses a blue-to-red diverging colormap based on P(Commercial).
+- **3-class** (`INCLUDE_OTHER = True`): Commercial vs Residential vs Other. Heatmap uses categorical colors (red/blue/green) with confidence-based opacity.
+
+### Data sources
+
+- **PLUTO** (NYC tax-lot data): building characteristics, landuse, zone type labels. Required. Place at `ramy/NYC_pluto_25v4_csv/pluto_25v4.csv`.
+- **OpenStreetMap** (via Overpass API): amenities, shops, tourism POIs. Fetched automatically; responses cached in `Grid-Finding/cache/`.
 
 ---
 
-## Output columns
+## Other Pipelines
 
-| Group | Columns |
-|-------|---------|
-| Location | `location` |
-| Identifiers | `osm_id`, `lat`, `lon`, `distance_m` |
-| Y-target | `label` |
-| Morphological | `highway_type`, `lanes`, `lot_area_sqft` |
-| Proximity | `dist_bus_stop_m`, `dist_hospital_m`, `dist_school_m`, `dist_park_m` |
-| Socioeconomic | `com_ratio`, `res_ratio` |
-| Census | `median_income`, `population_density` |
-| PLUTO-derived | `rent_proxy_per_sqft`, `year_built` |
-| Foot traffic | `pedestrian_demand_rank` |
-| Subway | `dist_subway_m` |
-| Density | `shop_density_100m`, `shop_type_entropy_200m` |
+### General OSM Scraper (`General-OSM-Scraper/`)
 
----
+Per-location feature extraction. Loops over neighborhoods in `locations.json`, runs 13 notebooks per location, and merges into a combined CSV. Can also be driven from the **Flask web UI** (`launch_site_scraper.bat` → http://localhost:5000).
 
-## ML Visualization
+### Zone Finding (`Zone-Finding/`)
 
-`ML_Plot/NYC_classification.ipynb` runs logistic regression and XGBoost on the combined CSV, generating plots to `ML_Plot/outputs/latest/`. Auto-detects the latest `combined_*.csv` — no hardcoded path needed.
+Predecessor to Grid Finding. Classifies Manhattan census tracts (~310) instead of grid cells. Same features but uses irregular tract boundaries. Grid Finding supersedes this with 7-8x more data points and portability to any borough.
+
+### ML Plot (`ML_Plot/`)
+
+Standalone ML notebook for the General OSM Scraper output. Runs logistic regression and XGBoost on the combined CSV.
 
 ---
 
@@ -120,38 +166,22 @@ Notebook 09 requires NYC Pedestrian Mobility Plan data (`ramy/pedestrian_mobilit
 
 ```
 OSMnx-data-scraper/
-├── General-OSM-Scraper/        <- notebook pipeline
+├── Grid-Finding/               <- main pipeline (recommended)
+│   ├── 00_orchestrator.ipynb   <- start here
+│   ├── 01-06_*.ipynb           <- feature extraction notebooks
+│   ├── 07_ml_classification.ipynb
+│   ├── 08_heatmap_visualization.ipynb
+│   ├── 09_comparison.ipynb
+│   ├── grid.json               <- auto-generated config
+│   ├── csv/                    <- per-borough timestamped CSVs
+│   ├── outputs/                <- per-borough timestamped plots
+│   └── cache/                  <- Overpass API cache
+├── Zone-Finding/               <- census tract pipeline (Manhattan only)
+├── General-OSM-Scraper/        <- per-location notebook pipeline
 ├── Site_Scraper_App/           <- Flask web UI
-│   ├── Site_Scraper_App.py     <- backend (~1100 lines, 40+ endpoints)
-│   ├── static/app.js           <- frontend (vanilla JS + Leaflet)
-│   └── templates/index.html
-├── ML_Plot/                    <- ML classification + plots
-├── launch_site_scraper.bat     <- launches the web UI
+├── ML_Plot/                    <- standalone ML plots
+├── ramy/                       <- PLUTO + pedestrian data (not in repo)
 ├── setup.ps1                   <- one-time environment setup
-└── requirements.txt            <- all Python dependencies
+├── requirements.txt            <- all Python dependencies
+└── launch_site_scraper.bat     <- launches Flask web UI
 ```
-
----
-
-## Changelog
-
-### 2026-05-10 — Fix setup and missing dependencies
-- Rebuilt `.venv` after project moved from E: to C: drive (old venv was corrupted)
-- Added `flask`, `papermill`, `xgboost`, `matplotlib` to `requirements.txt` (were missing)
-- Fixed `setup.ps1` encoding issue (smart quotes broke PowerShell parser)
-- Updated `setup.ps1` next-steps instructions to reference current app entry points
-
-### 2026-05-07 — Notebooks 07-13 + enrichment timeline UI
-- Added notebooks 07-13 (rent proxy, building age, foot traffic, subway distance, shop density, population density, shop type mix)
-- Flask UI groups notebooks 07-13 under a single "Enrichment" toggle with dot-based mini-timeline
-- Cached TigerWeb census tract centroids (`cache/tract_centroids.json`)
-
-### 2026-05-04 — Multi-location pipeline + column cleanup
-- Added `locations.json` for multi-neighborhood scraping
-- Orchestrator iterates all locations, merges into `combined_<RUN_ID>.csv` with `location` column
-- Removed unused/redundant columns from final CSV
-
-### 2026-05-01 — Pipeline V01
-- Initial end-to-end pipeline via `00_orchestrator.ipynb`
-- Versioned CSV output
-- `.gitignore` excludes intermediate and final CSV files
