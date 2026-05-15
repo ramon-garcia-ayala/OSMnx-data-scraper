@@ -1,8 +1,10 @@
 # OSMnx Data Scraper — Urban Zone Classification
 
-Predicts **Commercial vs Residential** zones across NYC boroughs using OpenStreetMap + PLUTO data on a regular 150m grid. Trains Logistic Regression, XGBoost, and Random Forest on 11 features extracted per grid cell. Produces heatmap visualizations and cross-borough comparison analysis.
+Predicts **Commercial vs Residential** zones across NYC boroughs using OpenStreetMap + PLUTO data on a regular 150m grid. Trains Logistic Regression, XGBoost, and Random Forest on 10 features extracted per grid cell. Produces heatmap visualizations and cross-borough comparison analysis.
 
 ![Combined borough heatmap](Grid-Finding/outputs/Comparison/02_combined_map.png)
+
+![Side-by-side borough heatmaps](Grid-Finding/outputs/Comparison/03_heatmaps_side_by_side.png)
 
 ---
 
@@ -57,7 +59,7 @@ PLUTO_PATH = "../ramy/NYC_pluto_25v4_csv/pluto_25v4.csv"
 | `"BX"` | Bronx | ~2,500+ |
 | `"SI"` | Staten Island | ~2,000+ |
 
-Run multiple boroughs at once: `BOROUGH = ["MN", "BK", "QN"]`. Each borough runs independently with its own timestamped output folder.
+Run multiple boroughs at once: `BOROUGH = ["MN", "BK", "QN"]`. Each borough runs independently with its own output folder.
 
 ### How it works
 
@@ -70,7 +72,7 @@ For each borough:
   03  Building Characteristics avg floors, year built, building count, area (PLUTO)
   04  Land Use Mix             Shannon entropy of landuse distribution (PLUTO)
   05  Tourism Intensity        tourism POI density (OSM Overpass)
-  06  Commercial Density       shop density, type entropy, brand ratio (OSM Overpass)
+  06  Commercial Density       shop density, brand ratio (OSM Overpass)
   ──────────────────────────────────────────────────────────────
   07  ML Classification        train LR, XGBoost, RF → export predictions
   08  Heatmap Visualization    static + interactive maps with basemap
@@ -79,14 +81,13 @@ After all boroughs:
   09  Borough Comparison       cross-borough charts, combined map, side-by-side plots
 ```
 
-### Features (11 columns)
+### Features (10 columns)
 
 | Feature | Source | Description |
 |---------|--------|-------------|
 | `amenity_density` | OSM | Amenities per km2 |
 | `amenity_ratio_food_drink` | OSM | Proportion of food/drink amenities |
 | `shop_density_km2` | OSM | Shops per km2 |
-| `shop_type_entropy` | OSM | Shannon diversity of shop types |
 | `brand_ratio` | OSM | Fraction of shops with a brand tag |
 | `tourism_density` | OSM | Tourism POIs per km2 |
 | `landuse_entropy` | PLUTO | Shannon entropy of landuse categories |
@@ -97,21 +98,21 @@ After all boroughs:
 
 ### Output structure
 
-Each run creates timestamped folders per borough:
+Each borough gets one folder, overwritten on every run:
 
 ```
 Grid-Finding/
 ├── csv/
-│   ├── Manhattan_2026-05-15_14h30/
+│   ├── Manhattan/
 │   │   ├── 01_grid_definition.csv      (intermediate, gitignored)
 │   │   ├── 02_amenity_composition.csv   (intermediate, gitignored)
 │   │   ├── ...
 │   │   ├── combined_grid.csv            (tracked in git)
 │   │   └── 07_predictions.csv           (intermediate, gitignored)
-│   └── Brooklyn_2026-05-15_14h30/
+│   └── Brooklyn/
 │       └── ...
 ├── outputs/
-│   ├── Manhattan_2026-05-15_14h30/
+│   ├── Manhattan/
 │   │   ├── 01_countplot_zone_type.png
 │   │   ├── 02_feature_boxplots.png
 │   │   ├── 03_correlation_heatmap.png
@@ -122,7 +123,7 @@ Grid-Finding/
 │   │   ├── 08_heatmap_predictions.png
 │   │   ├── 08_heatmap_interactive.html
 │   │   └── 09_summary_dashboard.png
-│   ├── Brooklyn_2026-05-15_14h30/
+│   ├── Brooklyn/
 │   │   └── ...
 │   └── Comparison/
 │       ├── 01_borough_comparison.png
@@ -130,7 +131,17 @@ Grid-Finding/
 │       ├── 02_combined_map_interactive.html
 │       ├── 03_heatmaps_side_by_side.png
 │       ├── 04_dashboards_side_by_side.png
-│       └── 05_feature_comparison.png
+│       ├── 05_feature_comparison.png
+│       └── Combined Plots/
+│           ├── combined_01_countplot_zone_type.png
+│           ├── combined_02_feature_boxplots.png
+│           ├── combined_03_correlation_heatmap.png
+│           ├── combined_04_confusion_matrix_lr.png
+│           ├── combined_05_confusion_matrix_xgb.png
+│           ├── combined_06_confusion_matrix_rf.png
+│           ├── combined_07_feature_importance_rf.png
+│           ├── combined_08_heatmap_predictions.png
+│           └── combined_09_summary_dashboard.png
 └── cache/                               (Overpass API cache, gitignored)
 ```
 
@@ -173,8 +184,8 @@ OSMnx-data-scraper/
 │   ├── 08_heatmap_visualization.ipynb
 │   ├── 09_comparison.ipynb
 │   ├── grid.json               <- auto-generated config
-│   ├── csv/                    <- per-borough timestamped CSVs
-│   ├── outputs/                <- per-borough timestamped plots
+│   ├── csv/                    <- per-borough CSVs
+│   ├── outputs/                <- per-borough plots
 │   └── cache/                  <- Overpass API cache
 ├── Zone-Finding/               <- census tract pipeline (Manhattan only)
 ├── General-OSM-Scraper/        <- per-location notebook pipeline

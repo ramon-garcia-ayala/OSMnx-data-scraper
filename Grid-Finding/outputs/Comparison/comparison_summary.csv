@@ -1,3 +1,0 @@
-borough,total_cells,accuracy,pred_Commercial,pct_pred_Commercial,actual_Commercial,pct_actual_Commercial,pred_Residential,pct_pred_Residential,actual_Residential,pct_actual_Residential
-Manhattan,1631,0.8608215818516247,418,25.628448804414468,283,17.351318209687307,1213,74.37155119558552,1348,82.6486817903127
-Manhattan_Brooklyn_Queens_Bronx_Staten Island,21788,0.8277492197539931,4487,20.593904901780796,954,4.378557003855334,17301,79.4060950982192,20834,95.62144299614467

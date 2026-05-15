@@ -1,6 +1,6 @@
 {
     "borough_filter": [
-        "MN"
+        "SI"
     ],
     "borough_codes": {
         "MN": 1,
@@ -13,7 +13,7 @@
     "min_lots_per_cell": 3,
     "pluto_path": "../ramy/NYC_pluto_25v4_csv/pluto_25v4.csv",
     "include_other": false,
-    "csv_dir": "csv/Manhattan_2026-05-15_09h54",
+    "csv_dir": "csv/Staten Island",
     "feature_flags": {
         "needs_pluto": true
     },
