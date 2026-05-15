@@ -10,6 +10,8 @@ OSMnx Data Scraper extracts commercial establishment data from OpenStreetMap for
 
 Requires Python 3.11 on Windows. Run `setup.ps1` (needs `Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned` first). This creates the `.venv`, installs dependencies from `requirements.txt`, and registers the `osmnx-scraper` Jupyter kernel.
 
+If `.venv` exists but is missing `Scripts/` and `Lib/`, it was created on a different drive — delete it and re-run `setup.ps1`. `requirements.txt` includes all dependencies: `flask`, `papermill`, `xgboost`, `matplotlib`, `osmnx`, `scikit-learn`, and all Jupyter/notebook packages.
+
 ## Running
 
 - **Flask web UI:** `launch_site_scraper.bat` or VS Code build task (Ctrl+Shift+B). Runs on http://localhost:5000.
