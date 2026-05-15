@@ -101,8 +101,8 @@ Notebook responsibilities:
 - **04** — Land use mix: landuse_entropy only (HHI dropped as redundant)
 - **05** — Tourism intensity: tourism_density only (single batch Overpass query + BallTree)
 - **06** — Commercial density: shop_density_km2, shop_type_entropy, brand_ratio (single batch Overpass query + BallTree)
-- **07** — ML classification: LR, XGBoost, RF with binary classification (Commercial vs Residential). Uses `class_weight="balanced"`. Exports predictions CSV with prob_commercial for heatmap
-- **08** — Heatmap visualization: static matplotlib heatmap with contextily basemap + diverging colormap (blue=Residential, red=Commercial) + folium interactive Leaflet.js map + summary dashboard (pie chart, actual vs predicted, P(Commercial) histogram, feature means)
+- **07** — ML classification: LR, XGBoost, RF. Classification mode controlled by `include_other` toggle in `grid.json`: `false` (default) = binary Commercial vs Residential, `true` = 3-class with Other. Uses `class_weight="balanced"`. Exports predictions CSV for heatmap
+- **08** — Heatmap visualization: adapts to `include_other` toggle. Binary mode: diverging colormap (blue→red by P(Commercial)). 3-class mode: categorical colors (red/blue/green) with confidence alpha. Both include contextily basemap + folium interactive map + summary dashboard
 
 Data flow:
 ```

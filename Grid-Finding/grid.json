@@ -10,6 +10,7 @@
     "grid_cell_size_m": 150,
     "min_lots_per_cell": 3,
     "pluto_path": "../ramy/NYC_pluto_25v4_csv/pluto_25v4.csv",
+    "include_other": false,
     "feature_flags": {
         "needs_pluto": true
     },
