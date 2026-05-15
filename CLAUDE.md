@@ -88,7 +88,7 @@ zones.json → 00_orchestrator → papermill(01..09) → per-notebook CSVs → c
 
 ### Grid Finding Pipeline (`Grid-Finding/`)
 
-Grid-based version of Zone-Finding. Replaces irregular census tracts with a **150m x 150m regular grid** over Manhattan (~1,810 cells). 3-class classification: **Commercial** (~283), **Residential** (~1,348, includes Mixed-Use), **Other** (~179, includes Institutional + Open Space + Industrial + Infrastructure).
+Grid-based version of Zone-Finding. Replaces irregular census tracts with a **150m x 150m regular grid** over Manhattan (~1,810 cells). Binary classification: **Commercial** (~283) vs **Residential** (~1,348, includes Mixed-Use). Other zone types (Institutional, Open Space, Industrial, Infrastructure) are dropped.
 
 Leaner pipeline: only 8 notebooks, only the 11 proven features are computed (no redundant/noise columns). Skips accessibility (05), socioeconomic (06), and pedestrian (08) notebooks entirely since all their features were noise.
 
@@ -101,8 +101,8 @@ Notebook responsibilities:
 - **04** — Land use mix: landuse_entropy only (HHI dropped as redundant)
 - **05** — Tourism intensity: tourism_density only (single batch Overpass query + BallTree)
 - **06** — Commercial density: shop_density_km2, shop_type_entropy, brand_ratio (single batch Overpass query + BallTree)
-- **07** — ML classification: LR, XGBoost, RF with 3-class classification (Commercial, Residential, Other). Uses `class_weight="balanced"`. Exports predictions CSV with per-class probabilities + confidence for heatmap
-- **08** — Heatmap visualization: static matplotlib heatmap with contextily basemap (red=Commercial, blue=Residential, green=Other, alpha scales with confidence) + folium interactive Leaflet.js map + summary dashboard (pie chart, actual vs predicted, confidence histogram, feature means)
+- **07** — ML classification: LR, XGBoost, RF with binary classification (Commercial vs Residential). Uses `class_weight="balanced"`. Exports predictions CSV with prob_commercial for heatmap
+- **08** — Heatmap visualization: static matplotlib heatmap with contextily basemap + diverging colormap (blue=Residential, red=Commercial) + folium interactive Leaflet.js map + summary dashboard (pie chart, actual vs predicted, P(Commercial) histogram, feature means)
 
 Data flow:
 ```
