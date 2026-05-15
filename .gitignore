@@ -37,12 +37,7 @@ Zone-Finding/csv/
 Zone-Finding/cache/
 Zone-Finding/outputs/
 
-# Grid-Finding — ignore cache + intermediate CSVs, track combined CSVs and outputs
+# Grid-Finding — all generated (regenerate via orchestrator)
 Grid-Finding/cache/
-Grid-Finding/csv/**/01_*.csv
-Grid-Finding/csv/**/02_*.csv
-Grid-Finding/csv/**/03_*.csv
-Grid-Finding/csv/**/04_*.csv
-Grid-Finding/csv/**/05_*.csv
-Grid-Finding/csv/**/06_*.csv
-Grid-Finding/csv/**/07_predictions.csv
+Grid-Finding/csv/
+Grid-Finding/outputs/

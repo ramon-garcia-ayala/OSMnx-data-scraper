@@ -148,7 +148,7 @@ locations.json → 00_orchestrator → papermill(01..13) → per-site CSVs → c
 - Zone-Finding is fully independent from General-OSM-Scraper — no shared code or utilities.
 - Zone-Finding combined CSV: ~310 rows (Manhattan census tracts) x ~35 feature columns. Unit of analysis is the census tract (`bct2020` from PLUTO), not individual POIs.
 - Grid-Finding is fully independent from both Zone-Finding and General-OSM-Scraper — no shared code.
-- Grid-Finding CSV outputs go to per-borough folders under `Grid-Finding/csv/` (e.g. `csv/Manhattan/`), cache to `Grid-Finding/cache/`. Same Overpass cache strategy as Zone-Finding. Intermediate CSVs (01–06, 07_predictions) are gitignored; combined CSVs and outputs are tracked.
+- Grid-Finding CSV outputs go to per-borough folders under `Grid-Finding/csv/` (e.g. `csv/Manhattan/`), cache to `Grid-Finding/cache/`. Same Overpass cache strategy as Zone-Finding. All CSVs, outputs, and cache are gitignored — regenerate by running the orchestrator.
 - Grid-Finding combined CSV: `combined_grid.csv` inside the borough folder. ~1,810 rows (150m grid cells) x 15 columns (5 base + 10 features). Unit of analysis is a 150m x 150m grid cell. Portable to other boroughs by changing `borough_filter` in `grid.json`.
 - Grid-Finding notebooks 03, 04 depend on PLUTO (`needs_pluto` flag). OSM notebooks (02, 05, 06) work anywhere with Overpass API.
 - Grid-Finding heatmap (notebook 08) requires `folium` for interactive map. Static matplotlib heatmap always works.

@@ -98,17 +98,17 @@ After all boroughs:
 
 ### Output structure
 
-Each borough gets one folder, overwritten on every run:
+Each borough gets one folder, overwritten on every run. All `csv/` and `outputs/` are gitignored — regenerate by running the orchestrator.
 
 ```
 Grid-Finding/
-├── csv/
+├── csv/                                 (gitignored)
 │   ├── Manhattan/
-│   │   ├── 01_grid_definition.csv      (intermediate, gitignored)
-│   │   ├── 02_amenity_composition.csv   (intermediate, gitignored)
+│   │   ├── 01_grid_definition.csv
+│   │   ├── 02_amenity_composition.csv
 │   │   ├── ...
-│   │   ├── combined_grid.csv            (tracked in git)
-│   │   └── 07_predictions.csv           (intermediate, gitignored)
+│   │   ├── combined_grid.csv
+│   │   └── 07_predictions.csv
 │   └── Brooklyn/
 │       └── ...
 ├── outputs/
