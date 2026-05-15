@@ -14,6 +14,7 @@ Requires Python 3.11 on Windows. Run `setup.ps1` (needs `Set-ExecutionPolicy -Sc
 
 - **Flask web UI:** `launch_site_scraper.bat` or VS Code build task (Ctrl+Shift+B). Runs on http://localhost:5000.
 - **Notebook pipeline directly:** Run `General-OSM-Scraper/00_orchestrator.ipynb` cells in order using the "OSMnx Scraper (Python 3.11)" kernel.
+- **Zone Finding pipeline:** Run `Zone-Finding/00_orchestrator.ipynb` cells in order. First run takes ~5–10 min (batch Overpass API queries); subsequent runs ~2–3 min (cached). All OSM notebooks (02, 05, 07, 09) use single batch bbox queries + BallTree matching instead of per-tract queries.
 
 There are no tests, linters, or CI configured.
 
@@ -54,14 +55,14 @@ The orchestrator (`00_orchestrator.ipynb`) runs notebooks 01–09 via papermill,
 
 Notebook responsibilities:
 - **01** — Zone definition: derives Y variable (`zone_type`) from PLUTO `landuse` via area-weighted aggregation per census tract (`bct2020`)
-- **02** — Amenity composition: counts/ratios of OSM amenity categories per tract (Overpass API)
+- **02** — Amenity composition: counts/ratios of OSM amenity categories per tract (single batch Overpass query + BallTree)
 - **03** — Building characteristics: avg floors, year built, lot area from PLUTO (`needs_pluto`)
 - **04** — Land use mix: Shannon entropy + HHI of landuse distribution (`needs_pluto`). No raw area ratios (prevents Y leakage)
-- **05** — Accessibility: subway/bus distances, transit stop count, intersection density (OSM + OSMnx)
+- **05** — Accessibility: subway/bus distances, transit stop count, intersection density (3 batch Overpass queries + BallTree, no OSMnx dependency)
 - **06** — Socioeconomic: median income, population density, poverty rate (Census ACS-5 API, direct tract FIPS join)
-- **07** — Tourism intensity: hotel count, tourism POI count/density/ratio (Overpass API)
-- **08** — Pedestrian activity: pedestrian rank from NYC Pedestrian Mobility Plan (`needs_pedestrian`)
-- **09** — Commercial density: shop count, density, type entropy, brand ratio (Overpass API)
+- **07** — Tourism intensity: hotel count, tourism POI count/density/ratio (single batch Overpass query + BallTree)
+- **08** — Pedestrian activity: pedestrian rank from NYC Pedestrian Mobility Plan (`needs_pedestrian`). Vectorized regex extraction.
+- **09** — Commercial density: shop count, density, type entropy, brand ratio (single batch Overpass query + BallTree)
 - **10** — ML classification: Logistic Regression, Random Forest, XGBoost with spatial CV (GroupKFold)
 
 Feature strategy (no data overlap): PLUTO for building/land features, OSM for amenities/transit/tourism, Census for socioeconomic. PLUTO area ratios excluded to prevent Y variable leakage.
@@ -94,5 +95,6 @@ locations.json → 00_orchestrator → papermill(01..13) → per-site CSVs → c
 - `cache/tract_centroids.json` is a shared cache of TigerWeb census tract centroids used by notebooks 06 and 12. First run fetches ~2000 centroids in parallel; subsequent runs are instant.
 - Notebooks are JSON — when editing f-strings, always use explicit `\n` escapes, never literal newlines inside strings (they produce `SyntaxError: unterminated string literal`).
 - Zone-Finding notebooks 03, 04 depend on PLUTO (`needs_pluto` flag in `zones.json`). Notebook 08 depends on Pedestrian Mobility data (`needs_pedestrian`). Both auto-skip with NaN-filled CSVs if data is absent.
-- Zone-Finding CSV outputs go to `Zone-Finding/csv/` and are gitignored. The `cache/` directory stores Overpass API responses.
+- Zone-Finding CSV outputs go to `Zone-Finding/csv/` and are gitignored. The `cache/` directory stores Overpass API responses as JSON files keyed by SHA1 of the query string. Cache persists across kernel restarts and machine reboots — only invalidated if query parameters change (e.g., different bbox or coordinates). Safe to delete `Zone-Finding/cache/` to force re-fetch from Overpass. Batch queries produce fewer, larger cache files than per-tract queries.
 - Zone-Finding is fully independent from General-OSM-Scraper — no shared code or utilities.
+- Zone-Finding combined CSV: ~310 rows (Manhattan census tracts) x ~35 feature columns. Unit of analysis is the census tract (`bct2020` from PLUTO), not individual POIs.

@@ -30,3 +30,10 @@ Hey Claude, a partir de este momento crearemos un workflow para hacer un data sc
 
 **SET 02**
 *aqui estrán debajo los tasks que hay que trabajar numeradas y separadas por sets mediante una line, las instrucciones las tendrás en el chat*
+1. Haz un notebook donde pueda visualizar en un mapa 2D los census tracts de mi csv. file combined generado. Descarga las librerías generadas ahi para lograr su visualización.
+2. Crea una copia del notebook NYC_classification.ipynbm donde tenga el nombre de mi proceso Zone-Finding en el nombre del archivo. Ajusta los parametros para generar los plots necesarios mediante mi archivo combinado del dataset de mi Zone-Finding pipeline.
+3. CAMBIA EL NOTEBOOK DEL STEP 10_ML_CLASSIFICATION POR UNA COPIA DEL NYC_classification.ipynbm (Ese es mi proceso de ML QUE SE QUE FUNCIONA). Ajusta los parametros para generar los plots necesarios mediante mi archivo combinado del dataset de mi Zone-Finding pipeline          
+
+3. Optimiza 05_Accessibility mediante tus sugerencias:
+    - Hacer 1 query batch para todo Manhattan en vez de 310 queries individuales — buscar todos los subways y bus stops de Manhattan en un solo query, luego calcular distancias localmente con BallTree
+    - Reducir el sleep a 0.3s para queries cacheados (ya no se necesita rate limit)
