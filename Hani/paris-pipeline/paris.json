@@ -1,0 +1,26 @@
+{
+    "city": "Paris, France",
+    "nuts_code": "FR10",
+    "grid_cell_size_m": 150,
+    "min_buildings_per_cell": 3,
+    "eubucco_sample_per_type": 10000,
+    "include_other": false,
+    "csv_dir": "csv/Paris",
+    "outputs_dir": "outputs/Paris",
+    "target_labels": [
+        "residential",
+        "commercial",
+        "industrial"
+    ],
+    "feature_flags": {
+        "needs_eubucco": true,
+        "needs_osm": true
+    },
+    "grid_params": {
+        "lat_min": 48.11922652456419,
+        "lon_min": 1.4492052859351308,
+        "lat_step": 0.0013513513513513514,
+        "lon_step": 0.0020519389526231784,
+        "ref_lat": 48.80887666574993
+    }
+}
