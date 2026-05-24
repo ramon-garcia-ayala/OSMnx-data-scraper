@@ -1,0 +1,38 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Launch Site Scraper",
+      "type": "shell",
+      "command": "${workspaceFolder}\\launch_site_scraper.bat",
+      "windows": {
+        "command": "${workspaceFolder}\\launch_site_scraper.bat"
+      },
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "presentation": {
+        "reveal": "silent",
+        "panel": "shared",
+        "close": true
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Launch Site Scraper (terminal)",
+      "type": "shell",
+      "command": "python",
+      "args": ["Site_Scraper_App/Site_Scraper_App.py"],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "group": "build",
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      },
+      "problemMatcher": []
+    }
+  ]
+}
