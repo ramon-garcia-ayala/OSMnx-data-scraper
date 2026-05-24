@@ -31,6 +31,7 @@ Thumbs.db
 
 # CSV files
 ramy/NYC_pluto_25v4_csv/pluto_25v4.csv
+hcad/harris_county_building_data.csv
 
 # Zone-Finding intermediates
 Zone-Finding/csv/
@@ -41,3 +42,7 @@ Zone-Finding/outputs/
 Grid-Finding/cache/
 Grid-Finding/csv/
 Grid-Finding/outputs/
+
+# Houston HCAD — large geospatial data (1GB+ shapefile)
+ahmad/Houston_data/
+harris_county_building_data.csv
