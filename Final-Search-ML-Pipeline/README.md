@@ -60,7 +60,7 @@ The unit of analysis is a **150m x 150m grid cell**. Each cell receives a class 
 
 ![Class Distribution](outputs/01_class_distribution.png)
 
-All models use `class_weight="balanced"` to compensate for class imbalance.
+**Interpretation:** The left panel shows severe class imbalance — Residential cells outnumber Commercial cells ~9:1 overall. The right panel reveals that this imbalance is not uniform: LA dominates the dataset with ~23K cells while NYC contributes only ~1.6K, and DC has the most extreme ratio (14.3:1) while SF is the most balanced (6.1:1). This heterogeneity means the model must learn patterns that work across very different city compositions. All models use `class_weight="balanced"` to prevent the classifier from defaulting to "always predict Residential."
 
 ---
 
@@ -133,15 +133,23 @@ Based on the ablation study from the Baseline:
 
 Property-derived features have high NaN rates because OSM-only cities cannot obtain complete building geometry from the Overpass API (server memory limits for large bounding boxes). NaN values are imputed as 0 during ML training.
 
+### Feature Boxplots
+
 ![Feature Boxplots](outputs/02_feature_boxplots.png)
+
+**Interpretation:** The boxplots reveal which features visually separate classes. `landuse_entropy` shows the clearest difference: Commercial cells have a higher median (~1.0) than Residential (~0.0), with little box overlap — confirming it as the top discriminator. `amenity_density`, `shop_density_km2`, and `road_density_primary` also show Commercial medians shifted higher, though with substantial outlier tails. `avg_yearbuilt` boxes overlap almost completely between classes — a visual preview of why the ablation study later shows it harms the model. `nightlife_density` and `office_density` have nearly identical boxes for both classes (medians near zero), suggesting their discriminating power comes only from extreme outliers rather than systematic differences.
+
+### Correlation Heatmap
 
 ![Correlation Heatmap](outputs/03_correlation_heatmap.png)
 
+**Interpretation:** The only strong correlation is `avg_floors` vs `total_bldg_area` (r=0.76) — taller buildings produce more floor area, which is expected but not problematic since both carry different signals (height vs mass). The commercial activity cluster (`amenity_density`, `shop_density_km2`, `office_density`, `nightlife_density`) shows moderate inter-correlation (r=0.20-0.45), meaning they capture overlapping but not identical commercial signals. Critically, `road_density_primary` is nearly uncorrelated with everything (r<0.07 with all features), meaning it provides unique spatial information that no other feature captures. `avg_yearbuilt` is weakly *negatively* correlated with `landuse_entropy` (r=-0.30), suggesting older areas have more homogeneous land use. No pair exceeds |r|>0.8, so all 13 features are retained without multicollinearity concerns.
+
 ### Pairplot — Top 6 Features by Ablation Importance
 
-The pairplot below shows pairwise scatter plots and KDE distributions for the 6 most discriminating features (ranked by ablation impact). Commercial cells (red) tend to cluster at higher values of `landuse_entropy`, `intersection_density`, `amenity_density`, and `shop_density_km2`, while Residential cells (blue) dominate the low-value regions. The diagonal KDE plots reveal that `landuse_entropy` provides the clearest single-feature separation between classes.
-
 ![Pairplot](outputs/22_pairplot.png)
+
+**Interpretation:** The pairplot of the 6 most impactful features (3K subsample) reveals the pairwise relationships driving classification. The diagonal KDE plots show `landuse_entropy` provides the clearest single-feature separation: Residential (blue) peaks sharply at zero while Commercial (red) spreads across higher values. In the scatter panels, Commercial cells cluster at higher values of `intersection_density` + `amenity_density` simultaneously — confirming that commercial zones are characterized by *co-occurring* density signals, not any single feature. Most distributions are heavily right-skewed with the bulk of both classes compressed near the origin, which explains why tree-based models (XGBoost, RF) outperform linear models: the decision boundaries are not linear cuts through feature space but complex threshold combinations.
 
 ---
 
@@ -160,12 +168,7 @@ Two approaches were compared:
 
 ![Binary vs 3-Class](outputs/20_binary_vs_3class.png)
 
-| Configuration | Samples | Classes | Accuracy (CV) | Std |
-|---|---|---|---|---|
-| **Binary (no Mixed-Use)** | **49,848** | **2** | **71.8%** | **+/-25.0%** |
-| 3-Class (with Mixed-Use) | 53,391 | 3 | 57.5% | +/-25.0% |
-
-**Difference: +14.3 percentage points in favor of Binary.** Mixed-Use characteristics overlap significantly with both Residential and Commercial, making it inherently ambiguous. For universal prediction, Binary is clearly superior.
+**Interpretation:** The left panel shows Binary classification (71.8%) outperforms 3-Class (57.5%) by 14.3 percentage points, but both have high variance (error bars span ~25%), reflecting cross-validation folds where entire cities fall into test sets. The right panel explains why: Mixed-Use adds only ~3,500 cells (a small green bar) but creates a third class that overlaps heavily with both Residential and Commercial in feature space. The model cannot reliably distinguish Mixed-Use because its observable characteristics are, by definition, a blend of both. For prediction purposes, Binary is clearly superior; however, the 3-Class result is not useless — cells the Binary model is uncertain about (probability near 0.5) are natural candidates for Mixed-Use or transition zones.
 
 ---
 
@@ -184,7 +187,11 @@ Two approaches were compared:
 
 Combined training with 53,391 cells from 6 cities (80/20 stratified split). Binary classification: Commercial vs Residential.
 
+### Model Comparison
+
 ![Model Comparison](outputs/13_model_comparison.png)
+
+**Interpretation:** XGBoost (91.0%) and ANN (90.2%) lead the field, while LR and RF cluster together at ~81%. The ~10% gap between XGBoost and LR quantifies how much nonlinearity exists in the data — the problem is fundamentally nonlinear, justifying the use of complex models. The fact that ANN nearly matches XGBoost but with much worse Commercial F1 (0.13 vs 0.37) reveals that the neural network achieves high accuracy by defaulting to "Residential" for borderline cases, while XGBoost makes more balanced predictions. SVC (poly) at 86.2% sits between the two tiers, showing that polynomial feature interactions help but gradient boosting captures even more complex patterns.
 
 **Global results (combined test set):**
 
@@ -196,25 +203,41 @@ Combined training with 53,391 cells from 6 cities (80/20 stratified split). Bina
 | Random Forest | 81.28% | 0.44 | 0.89 |
 | Logistic Regression | 81.23% | 0.42 | 0.89 |
 
-**Key observations:**
-- XGBoost leads by a wide margin (+4.8% over SVC, +9.7% over RF)
-- In the Baseline (Manhattan only), SVC poly was the best. With 6 heterogeneous cities, XGBoost dominates — its ability to handle heterogeneous data and imbalanced classes shines
-- ANN achieves similar accuracy to XGBoost but with very low Commercial F1 (0.13) — it predicts almost everything as Residential
+#### Logistic Regression (Baseline)
 
-#### Individual Model Results
+![LR Confusion Matrix](outputs/08_lr_confusion.png)
 
-| | |
-|---|---|
-| ![LR Confusion Matrix](outputs/08_lr_confusion.png) | ![XGBoost Results](outputs/09_xgb_results.png) |
-| ![RF Results](outputs/10_rf_results.png) | ![SVC Results](outputs/11_svc_results.png) |
-| ![ANN Results](outputs/12_ann_results.png) | |
+**Interpretation:** LR correctly identifies 711 of 1,083 Commercial cells (65.6% recall) but misclassifies 1,632 Residential cells as Commercial (17% false positive rate). The high off-diagonal counts show that the linear decision boundary cuts through a region where both classes overlap. Despite this, 81.2% overall accuracy confirms the problem is partially linearly separable — a necessary sanity check before trying nonlinear models.
+
+#### XGBoost
+
+![XGBoost Results](outputs/09_xgb_results.png)
+
+**Interpretation:** XGBoost achieves the highest accuracy (91.0%) but at a cost: it misses 795 of 1,083 Commercial cells (73.4% missed), predicting them as Residential. It compensates by being very precise on Residential (9,428 correct vs 168 false positives). The feature importance ranking reveals `amenity_ratio_food_drink` as the top split feature (0.25), followed by `shop_density_km2` (0.21) and `amenity_density` (0.14). This differs from the ablation ranking where `landuse_entropy` dominates — because XGBoost measures *split frequency* while ablation measures *accuracy impact*. `landuse_entropy` may be used in fewer splits but each split is highly informative.
+
+#### Random Forest
+
+![RF Results](outputs/10_rf_results.png)
+
+**Interpretation:** RF shows a fundamentally different confusion pattern than XGBoost: it correctly identifies 800 of 1,083 Commercial cells (73.9% recall) but generates 1,716 Residential false positives. This means RF is more aggressive at predicting Commercial — better recall but worse precision. The feature importance ranking (`amenity_density` > `shop_density_km2` > `amenity_ratio_food_drink` > `intersection_density` > `landuse_entropy`) largely agrees with XGBoost on the top features, confirming these signals are robust across model families. The bottom features (`road_density_primary`, `nightlife_density`, `avg_yearbuilt`) are consistently ranked low by both models.
+
+#### Support Vector Classification
+
+![SVC Results](outputs/11_svc_results.png)
+
+**Interpretation:** Three kernels compared: poly (86.2%) > linear (83.1%) > rbf (82.6%). The polynomial kernel's superiority over linear confirms nonlinear feature interactions matter. Interestingly, rbf performs *worse* than linear — suggesting the data's nonlinearity is better captured by polynomial terms (feature products) than by radial distance in feature space. The poly confusion matrix shows a balanced trade-off: 521 Commercial correct, 562 missed, and 911 Residential false positives — a middle ground between XGBoost's conservative approach and RF's aggressive one.
+
+#### Artificial Neural Network
+
+![ANN Results](outputs/12_ann_results.png)
+
+**Interpretation:** The loss curves show training loss decreasing steadily while validation loss plateaus and oscillates after epoch 4 — a textbook sign of mild overfitting. The accuracy curves confirm this: training reaches 91.2% while validation stagnates at ~89.5%. The confusion matrix reveals the ANN's failure mode: it predicts only 75 cells as Commercial (vs 1,083 actual), classifying 1,008 Commercial cells as Residential. This extreme bias toward the majority class means the ANN learned to minimize loss by predicting Residential almost universally. Despite 90.2% accuracy, its F1 for Commercial (0.13) makes it the worst model for actually *finding* commercial zones.
 
 #### Hyperparameter Tuning
 
-- RF best params: `max_depth=None, min_samples_leaf=1, n_estimators=200` — CV accuracy 88.4%
-- SVC best params: `C=0.1, gamma=scale, kernel=poly` — CV accuracy 88.2%
-
 ![RF Tuning](outputs/15_tuning_rf.png)
+
+**Interpretation:** The top 10 RF hyperparameter combinations all cluster tightly between 84-88% CV accuracy, with overlapping error bars. The best configuration (`max_depth=None, min_samples_leaf=1, n_estimators=200`) achieves 88.4% — only marginally above the defaults. `max_depth=None` (unlimited depth) consistently outperforms `max_depth=12`, indicating the trees need deep branches to capture the complex feature interactions in 6-city data. The minimal improvement from tuning (+1-2%) confirms that Random Forest's default hyperparameters are already well-suited to this problem.
 
 ### 5.3 Ablation Study
 
@@ -222,23 +245,7 @@ The ablation study measures each feature's impact by removing it and measuring a
 
 ![Ablation Study](outputs/14_ablation_study.png)
 
-| Feature Removed | Accuracy Without It | Impact |
-|---|---|---|
-| landuse_entropy | 74.68% | **-7.08%** (most important) |
-| intersection_density | 77.41% | -4.34% |
-| amenity_density | 78.63% | -3.13% |
-| shop_density_km2 | 78.82% | -2.93% |
-| building_count | 79.74% | -2.01% |
-| transit_stop_density | 80.72% | -1.03% |
-| road_density_primary | 81.01% | -0.74% |
-| amenity_ratio_food_drink | 81.28% | -0.47% |
-| office_density | 81.66% | -0.09% |
-| nightlife_density | 81.79% | +0.04% (noise) |
-| total_bldg_area | 82.12% | +0.37% (noise) |
-| avg_floors | 81.82% | +0.07% (noise) |
-| avg_yearbuilt | 87.78% | **+6.02%** (harms the model) |
-
-**Key finding:** `avg_yearbuilt` has a strong *negative* impact — accuracy **improves by 6%** when removed. This is because `avg_yearbuilt` has 80.6% NaN in the dataset (only NYC, Philadelphia, and Chicago partially have it), and values imputed as 0 for OSM-only cities create a spurious signal.
+**Interpretation:** The ablation chart divides features into three clear tiers. **Tier 1 (essential):** `landuse_entropy` (-7.08%), `intersection_density` (-4.34%), `amenity_density` (-3.13%), and `shop_density_km2` (-2.93%) — removing any of these causes significant accuracy loss. These four features together encode the core urban signal: land use diversity, street connectivity, and commercial activity density. **Tier 2 (contributing):** `building_count` (-2.01%), `transit_stop_density` (-1.03%), `road_density_primary` (-0.74%), `amenity_ratio_food_drink` (-0.47%), and `office_density` (-0.09%) — small but positive contributions. **Tier 3 (harmful/noise):** `nightlife_density` (+0.04%), `total_bldg_area` (+0.37%), `avg_floors` (+0.07%) add noise, and `avg_yearbuilt` (+6.02%) actively damages the model. The `avg_yearbuilt` finding is the most striking: its 80.6% NaN rate means most cells have it imputed as 0, creating a spurious binary signal ("has year data" vs "doesn't") that the model memorizes instead of learning genuine urban patterns.
 
 ### 5.4 Transfer Learning: Ground Truth to OSM-Only
 
@@ -248,13 +255,7 @@ This is the **central experiment** of the project. The model is trained **exclus
 
 ![Transfer Learning](outputs/21_transfer_learning.png)
 
-| Trained On | Evaluated On | Accuracy | Cells |
-|---|---|---|---|
-| NYC + PHL + CHI | **GT Test Set** | **88.9%** | 22,815 |
-| NYC + PHL + CHI | DC | 91.7% | 4,273 |
-| NYC + PHL + CHI | LA | 86.7% | 23,008 |
-| NYC + PHL + CHI | SF | 80.6% | 3,295 |
-| NYC + PHL + CHI | **OSM-Only Average** | **86.7%** | 30,576 |
+**Interpretation:** The left panel shows the core result: Ground Truth accuracy (88.9%) vs OSM-Only accuracy (86.7%), with both bars comfortably above the 80% threshold (dashed line). The 2.2% gap is remarkably small given that OSM-Only cities have no property data at all. The center panel breaks this down per city: Ground Truth cities (NYC, Philadelphia, Chicago) achieve 97-98% because the model was trained on their data distribution, while OSM-Only cities show a gradient — DC (91.7%) transfers best because its compact urban form resembles the training cities, LA (86.7%) transfers well despite its sprawl, and SF (80.6%) transfers least well, likely due to missing building data in OSM. The right confusion matrix for OSM-Only predictions shows the familiar pattern: the model catches only 113 of ~2,846 Commercial cells but correctly classifies 26,409 Residential cells. The low Commercial recall in transfer is expected — OSM-derived zone labels are noisier than property-data labels, so some "Commercial" cells in OSM may be mislabeled.
 
 **Per-city accuracy:**
 
@@ -273,41 +274,65 @@ This is the **central experiment** of the project. The model is trained **exclus
 >
 > The delta between Ground Truth (88.9%) and OSM-Only (86.7%) is only **2.2 percentage points** — remarkably low. Urban signals from OSM (amenity density, land use entropy, intersection density, shops, offices, transit) generalize well across cities with distinct morphologies.
 
-**Differences among OSM-Only cities:**
-- **DC (91.7%):** The most compact and urbanly dense of the three — morphology similar to training cities
-- **LA (86.7%):** Despite being sprawling, achieves good accuracy — land use signal is strong
-- **SF (80.6%):** Lowest but still acceptable — possibly due to missing building data in OSM (0 buildings found by Overpass) and lower road coverage (0 road ways)
-
 ---
 
 ## 6. Exploratory Data Analysis
 
-### Dimensionality Reduction & Clustering
+### PCA (Principal Component Analysis)
 
-| | |
-|---|---|
-| ![PCA Biplot](outputs/04_pca.png) | ![t-SNE](outputs/06_tsne.png) |
-| ![SOM](outputs/03b_som.png) | ![ICA](outputs/05_ica.png) |
+![PCA Biplot](outputs/04_pca.png)
+
+**Interpretation:** The scree plot (left) shows PC1 explains only 23.7% and PC2 16.6% of variance — together just 40.3%. The 95% threshold requires 11 of 13 components, confirming the problem is genuinely high-dimensional: no pair of axes captures the full picture, and each feature adds non-redundant information. The biplot (right) shows both classes concentrated in a dense cloud near the origin, with Commercial cells (blue) spreading outward along PC1. The feature arrows (barely visible due to the dense cluster) point in diverse directions, confirming low inter-feature correlation. The extreme outlier at PC1~85 is likely a single high-density NYC cell pulling the axis. The key takeaway: PCA reduction to 2D loses ~60% of the information, which is why 2D visualizations show heavy class overlap while the full 13D models achieve 91% accuracy.
+
+### ICA (Independent Component Analysis)
+
+![ICA](outputs/05_ica.png)
+
+**Interpretation:** The ICA scatter by zone type (left) shows Commercial cells spreading into the negative IC1 tail (below -30), forming a faint gradient rather than a clean cluster — meaning the independent signals partially but not fully align with class labels. The scatter by city (center) is more revealing: each city forms a distinct cluster (NYC in red at top-right, LA in green spread across the left, Philadelphia in purple at top), indicating that city-specific feature distributions dominate the independent components more than class membership does. The mixing matrix (right) shows IC1 is driven by `intersection_density` (-0.86), `transit_stop_density` (-0.69), and `amenity_density` (-0.50) — a "urban intensity" signal. IC2 is dominated by `building_count` (0.78) and `avg_yearbuilt` (0.73) — a "property data availability" signal. IC3 loads on `road_density_primary` (-0.92) alone. This decomposition confirms that the data's independent sources are (1) urban activity density, (2) building/property characteristics, and (3) road infrastructure — three conceptually distinct dimensions of urbanism.
+
+### t-SNE
+
+![t-SNE](outputs/06_tsne.png)
+
+**Interpretation:** The t-SNE by zone type (left) shows Residential cells (orange) forming several distinct sub-clusters spread across the 2D space, while Commercial cells (blue) are scattered among them without forming their own coherent cluster. This means Commercial zones don't share a single "profile" — a commercial zone in LA looks different from one in NYC. The t-SNE by city (right) confirms this: each city forms its own tight cluster (DC in orange at upper-left, LA in green with two sub-clusters, Philadelphia in purple at top, Chicago in blue as a long ribbon, NYC in red at the right edge, SF as a tiny brown dot). The city-level clustering is much stronger than the class-level clustering, meaning **urban morphology varies more between cities than between zone types within a city**. This is why transfer learning works: the model must learn zone-agnostic patterns that transcend city-specific feature distributions.
+
+### SOM (Self-Organizing Map)
+
+![SOM](outputs/03b_som.png)
+
+**Interpretation:** The U-Matrix (left) shows a dark boundary region around coordinates (2-4, 2-4), indicating a zone of high dissimilarity between neighboring neurons — a natural cluster boundary. The SOM colored by zone type (center) shows Commercial cells (red) concentrated in the upper-left quadrant and scattered along the edges, while Residential (blue) dominates the right and bottom. The separation is partial: many neurons contain both classes, confirming the overlap seen in t-SNE. The SOM colored by city (right) shows that the cluster structure is driven by city morphology: Philadelphia (yellow) occupies the bottom-left, NYC (pink) clusters at the right, Chicago (blue) spans the top, and LA/DC/SF occupy distinct sub-regions. This mirrors the t-SNE finding that city identity is a stronger organizing principle than zone type in the feature space.
+
+### SOM Component Planes
+
+![SOM Component Planes](outputs/03c_som_components.png)
+
+**Interpretation:** Each mini-heatmap shows how one feature's intensity varies across the SOM grid. The most informative pattern is `landuse_entropy` (top-right): it lights up brightly in the upper-right corner — the same region where Commercial cells concentrate in the class-colored SOM. This visual confirmation of `landuse_entropy` as the top discriminator matches the ablation study. `avg_yearbuilt` shows a striking binary pattern: the bottom half is uniformly bright yellow (cities with property data) while the top is dark (OSM-only cities with imputed zeros) — visually explaining why this feature creates a spurious signal. `amenity_density`, `shop_density_km2`, and `office_density` all show similar hotspot locations (lower-left), confirming they capture co-occurring commercial activity. `road_density_primary` has an almost uniform dark pattern, showing low variance across the map — consistent with its low ablation impact.
 
 ### K-Means Clustering
 
-K-Means found **k=2 as the optimal number of clusters** (by silhouette score), aligning with the binary classification. The Adjusted Rand Index between clusters and actual zones is low (0.015), indicating that unsupervised clustering based on features alone captures different structure than the official zoning labels.
-
 ![K-Means Elbow](outputs/16_kmeans_elbow.png)
+
+**Interpretation:** The elbow plot (left) shows no sharp elbow — inertia decreases gradually without a clear break point, indicating the data does not have tightly separated clusters. The silhouette score (right) peaks at k=2 (0.39) with a secondary peak at k=4 (0.385), then drops to a minimum at k=5-6 before rising again. The k=2 optimum aligns with the binary classification, but the k=4 secondary peak is interesting: it suggests that beyond Commercial/Residential, there may be 2 additional sub-types — possibly corresponding to "dense urban" vs "suburban" variants of each class. The overall silhouette scores (0.33-0.39) indicate moderate cluster quality — the clusters exist but overlap, consistent with the t-SNE visualization showing intermixed classes.
 
 ### Encoding Comparison
 
 ![Encoding Comparison](outputs/07_encoding_comparison.png)
 
-### Feature Means by Zone Type
+**Interpretation:** StandardScaler (67.6%) and MinMaxScaler (67.4%) perform nearly identically — the <0.2% difference is within noise. No Scaling (47.6%) drops dramatically, confirming that Logistic Regression is sensitive to feature scale (features like `total_bldg_area` at ~164K would dominate unscaled). Log+StandardScaler (56.5%) performs worse than plain StandardScaler because the log transform compresses the long-tailed density features that carry the most signal. The conclusion: StandardScaler is the correct choice (and is used throughout the pipeline), but the scaling strategy has far less impact than feature selection or model choice.
+
+### Feature Means by Zone Type per City
 
 ![Feature Means](outputs/19_feature_means.png)
+
+**Interpretation:** The z-score plot (left) reveals NYC (red) as a dramatic outlier: it scores 2+ standard deviations above the mean on almost every feature (`amenity_density`, `shop_density_km2`, `office_density`, `transit_stop_density`, `intersection_density`, `nightlife_density`). This reflects Manhattan's extreme urban density — not representative of most American cities. LA and Chicago sit below the mean on most features, while DC and SF show mixed profiles. The raw scale plot (right) confirms the problem: `total_bldg_area` dominates at ~800K for NYC, making all other features invisible. The key insight for the model: **NYC is a feature-space outlier**, which explains why its per-city accuracy (73.5% in the combined model) is lower than LA's (87.5%) despite having property data — the model trained on all 6 cities learns patterns that NYC's extreme values don't follow.
 
 ---
 
 ## 7. Geographic Visualization
 
 ![Heatmap All Cities](outputs/17_heatmap_all_cities.png)
+
+**Interpretation:** The spatial heatmaps show model predictions overlaid on each city's geography. **Chicago** shows a clear commercial core (red) along the lakefront and major arteries, with residential (blue) neighborhoods spreading inland — matching the known urban structure. **DC** displays a compact commercial center (the National Mall / downtown corridor) surrounded by residential areas, with scattered commercial nodes at transit hubs. **LA** shows commercial zones concentrated along the coastal strip and major boulevards (Wilshire, Sunset), with vast residential expanses inland — reflecting LA's sprawling, car-oriented morphology. **NYC (Manhattan)** is almost entirely commercial (red), which is accurate for midtown/downtown but reveals the model struggles to differentiate Manhattan's mixed-use residential areas. **Philadelphia** shows a north-south commercial spine (Center City / Broad Street corridor) with residential neighborhoods on either side. **SF** is dominated by commercial predictions in the northeast (Financial District, SoMa) with residential in the western neighborhoods. These spatial patterns are urbanistically coherent — the model is learning real geographic structure, not random noise.
 
 ---
 
