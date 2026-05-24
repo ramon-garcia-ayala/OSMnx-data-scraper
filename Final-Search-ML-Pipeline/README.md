@@ -137,6 +137,12 @@ Property-derived features have high NaN rates because OSM-only cities cannot obt
 
 ![Correlation Heatmap](outputs/03_correlation_heatmap.png)
 
+### Pairplot — Top 6 Features by Ablation Importance
+
+The pairplot below shows pairwise scatter plots and KDE distributions for the 6 most discriminating features (ranked by ablation impact). Commercial cells (red) tend to cluster at higher values of `landuse_entropy`, `intersection_density`, `amenity_density`, and `shop_density_km2`, while Residential cells (blue) dominate the low-value regions. The diagonal KDE plots reveal that `landuse_entropy` provides the clearest single-feature separation between classes.
+
+![Pairplot](outputs/22_pairplot.png)
+
 ---
 
 ## 4. Classification Categories

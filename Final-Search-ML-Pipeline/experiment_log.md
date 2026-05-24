@@ -203,6 +203,17 @@ Final proposed composition (8 retained + 5 new — 2 removed):
 
 **Note on NaN in building features:** Features derived from property data (`avg_floors`, `avg_yearbuilt`, `building_count`, `total_bldg_area`) have high NaN percentages because OSM-only cities (SF, LA) cannot obtain complete building geometry from the Overpass API (server memory limits for large bboxes). These NaN values are imputed as 0 during ML training. The 9 pure-OSM features have 0% NaN.
 
+### 3.5 Pairplot — Feature Relationships
+
+A pairplot of the top 6 features by ablation importance (3K subsample) reveals the pairwise relationships between features and their class distributions. Key observations:
+
+- **`landuse_entropy`** provides the clearest single-feature separation: Commercial cells concentrate at higher entropy values (mixed land uses), while Residential cells peak near zero (homogeneous use).
+- **`intersection_density` vs `amenity_density`**: Commercial cells cluster at higher values of both, confirming the hypothesis that denser road networks and more amenities co-occur in commercial zones.
+- **`shop_density_km2`** shows a long-tailed distribution with Commercial cells dominating the high end, as expected.
+- Most features are heavily right-skewed, with the majority of cells (Residential) concentrated near zero — consistent with the class imbalance (8.9:1 ratio).
+
+See `outputs/22_pairplot.png`.
+
 ---
 
 ## 4. Classification Categories
@@ -394,6 +405,14 @@ The following visuals are produced by `ml_analysis.ipynb` and are the most relev
 |---|---|---|
 | City grid map | `heatmap_[city].png` | Scale and geographic distribution of the dataset — the problem has a spatial dimension |
 | Class distribution by city | (bar chart in EDA) | Imbalance varies by city — NYC is not representative of all |
+
+### Feature Engineering Plots
+
+| Plot | Expected File | What It Demonstrates |
+|---|---|---|
+| Feature boxplots | `02_feature_boxplots.png` | Distribution of each feature by class — visual feature selection |
+| Correlation heatmap | `03_correlation_heatmap.png` | No multicollinearity between features |
+| Pairplot (top 6 features) | `22_pairplot.png` | Pairwise feature relationships and class separation — `landuse_entropy` gives best single-feature split |
 
 ### Baseline Plots (Iteration 1)
 
