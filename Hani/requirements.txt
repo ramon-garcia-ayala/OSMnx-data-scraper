@@ -1,0 +1,5 @@
+geopandas
+pyarrow
+fsspec
+s3fs
+openpyxl
