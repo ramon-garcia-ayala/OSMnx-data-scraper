@@ -1,7 +1,8 @@
 # Regenerable outputs
 csv/
 cache/
-outputs/
+outputs/*
+!outputs/*.png
 
 # Runtime config (written by orchestrator)
 config.json

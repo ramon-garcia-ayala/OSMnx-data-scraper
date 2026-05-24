@@ -38,7 +38,8 @@ assets/
 # Final-Search-ML-Pipeline — generated artifacts
 Final-Search-ML-Pipeline/cache/
 Final-Search-ML-Pipeline/csv/
-Final-Search-ML-Pipeline/outputs/
+Final-Search-ML-Pipeline/outputs/*
+!Final-Search-ML-Pipeline/outputs/*.png
 Final-Search-ML-Pipeline/ml_analysis_output.ipynb
 Final-Search-ML-Pipeline/config.json
 
