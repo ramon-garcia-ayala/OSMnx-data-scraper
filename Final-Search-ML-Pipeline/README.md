@@ -333,7 +333,43 @@ Every decision in this project is backed by evidence — this is what distinguis
 
 ---
 
-## 9. How to Run
+## 9. Conclusion
+
+### Was the Hypothesis Correct?
+
+**Yes.** Observable urban characteristics extracted from OpenStreetMap can predict official land use without zoning data. A model trained on cities with property datasets (NYC, Philadelphia, Chicago) achieved **86.7% accuracy** on cities with only OSM (DC, SF, LA) — just **2.2% below** the Ground Truth baseline (88.9%). The best overall model (XGBoost) reached **90.98%**.
+
+### Research Objectives
+
+| Objective | Status | Evidence |
+|---|---|---|
+| **Universal Prediction** — predict land use in cities without property data | **MET** | All 3 OSM-only cities > 80% accuracy (DC: 91.7%, LA: 86.7%, SF: 80.6%) |
+| **Urban Transformation Detection** — identify zones where observable behavior diverges from official zoning | **PARTIALLY MET** | Framework established, but not field-validated. The 9% error rate means some "detected transformations" may be false positives. Requires temporal data or ground-truthing to confirm. |
+
+### Key Findings
+
+1. **`landuse_entropy` is the most important feature** (-7.08% when removed). The diversity of land uses within a 150m cell is the strongest signal separating Commercial from Residential.
+2. **`avg_yearbuilt` harms multi-city models** (+6% accuracy when removed) — 80.6% NaN rate creates spurious signal when imputed as 0.
+3. **Binary > 3-class by 14.3pp** (71.8% vs 57.5%). Mixed-Use is real (K-Means finds k=3) but too ambiguous for supervised classification.
+4. **City morphology matters less than expected.** The 2.2% transfer gap across cities as different as Manhattan and LA suggests the OSM-to-land-use relationship is remarkably consistent.
+
+### Limitations
+
+- All 6 cities are in the United States — features may not transfer to non-US urban contexts.
+- OSM coverage varies by neighborhood, potentially introducing systematic bias.
+- Building data gaps in OSM-only cities (SF/LA had near-zero building geometry from Overpass), forcing 4 features to be imputed as 0.
+- Binary classification ignores industrial, institutional, and recreational uses.
+
+### Future Work
+
+- Validate transformation detection against temporal OSM edits or satellite imagery.
+- Extend to non-US cities (Barcelona, London, Tokyo).
+- Remove `avg_yearbuilt` permanently (+6% expected gain).
+- Add prediction confidence thresholds — uncertain cells are the best transformation candidates.
+
+---
+
+## 10. How to Run
 
 ```bash
 # 1. Run the data pipeline (all 6 cities)
@@ -351,4 +387,4 @@ First run takes ~15 min (Overpass API queries); subsequent runs ~2-3 min (cached
 
 ---
 
-*Pipeline executed with 6 cities (60,278 cells). Transfer Learning results confirm the main hypothesis: OSM is sufficient for universal urban zone prediction (86.7% accuracy, only 2.2% below Ground Truth).*
+*Pipeline executed with 6 cities (60,278 cells). The hypothesis is confirmed: OSM is sufficient for universal urban zone prediction (86.7% accuracy, only 2.2% below Ground Truth). See Section 9 for the full conclusion.*
