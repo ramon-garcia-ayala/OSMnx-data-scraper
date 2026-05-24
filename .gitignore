@@ -44,4 +44,4 @@ Final-Search-ML-Pipeline/ml_analysis_output.ipynb
 Final-Search-ML-Pipeline/config.json
 
 # Large datasets (download manually)
-datasets/*.csv
+datasets/
