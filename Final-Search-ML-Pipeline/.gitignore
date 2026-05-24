@@ -1,0 +1,10 @@
+# Regenerable outputs
+csv/
+cache/
+outputs/
+
+# Runtime config (written by orchestrator)
+config.json
+
+# Temporary build scripts
+_build_notebook.py
