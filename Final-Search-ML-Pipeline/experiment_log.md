@@ -448,4 +448,48 @@ The following visuals are produced by `ml_analysis.ipynb` and are the most relev
 
 ---
 
-*Document completed. Pipeline executed with 6 cities (60,278 cells), ML notebook run with all models and visualizations. Transfer Learning results confirm the main hypothesis: OSM is sufficient for universal urban zone prediction (86.7% accuracy, only 2.2% below Ground Truth).*
+## 8. Conclusion
+
+### Was the Hypothesis Correct?
+
+**Yes.** The central hypothesis — that observable urban characteristics extracted from OpenStreetMap can predict official land use without zoning data — is confirmed by the experimental results.
+
+The transfer learning experiment provides the definitive evidence: a Random Forest model trained exclusively on 3 cities with property datasets (NYC, Philadelphia, Chicago) achieved **86.7% accuracy** when predicting land use in 3 cities with only OSM data (DC, SF, LA). This is only **2.2 percentage points below** the 88.9% accuracy on the Ground Truth test set. The gap is small enough to conclude that OSM signals generalize across cities with fundamentally different urban morphologies — from Manhattan's vertical density to LA's horizontal sprawl.
+
+The best overall model (XGBoost, trained on all 6 cities) reached **90.98% accuracy**, demonstrating that the 13 engineered features capture meaningful urban structure.
+
+### Were the Research Objectives Met?
+
+**Objective 1 — Universal Prediction: MET.**
+The model successfully predicts land use in cities without property data. All three OSM-only cities exceeded 80% accuracy (DC: 91.7%, LA: 86.7%, SF: 80.6%). This means the pipeline can be applied to any city in the world with reasonable OSM coverage — no proprietary data required.
+
+**Objective 2 — Urban Transformation Detection: PARTIALLY MET.**
+The framework for detecting transformation is established: cells where the model predicts "Commercial" but official zoning says "Residential" (or vice versa) are candidates for zones in transition. However, this objective was not fully validated because it requires longitudinal data (zoning at two points in time) or field verification to confirm that discrepancies actually correspond to real urban change rather than model error. The 9.02% misclassification rate means some "detected transformations" would be false positives. Future work should cross-reference model disagreements with temporal OSM edit histories or satellite imagery to distinguish genuine transformation from classification noise.
+
+### Key Findings
+
+1. **`landuse_entropy` is the single most important feature** (-7.08% accuracy when removed). The diversity of land uses within a 150m cell is the strongest signal distinguishing Commercial from Residential zones — stronger than building count, area, or any individual amenity type.
+
+2. **`avg_yearbuilt` actively harms multi-city models** (+6.02% accuracy when removed). This counterintuitive finding is explained by the 80.6% NaN rate: when imputed as 0 for OSM-only cities, it creates a spurious signal that the model learns to exploit, degrading generalization.
+
+3. **Binary classification outperforms 3-class by 14.3 percentage points** (71.8% vs 57.5% in cross-validation). Mixed-Use zones are inherently ambiguous — their observable characteristics overlap with both Residential and Commercial. For practical prediction, excluding Mixed-Use yields cleaner, more reliable results.
+
+4. **K-Means finds k=3 natural clusters** despite only 2 labeled classes. This unsupervised confirmation suggests that Mixed-Use is a real phenomenon in the data, not an artifact of labeling — even though it's difficult to classify with supervised methods.
+
+5. **City morphology matters less than expected.** The 2.2% transfer learning gap suggests that the relationship between urban features and land use is remarkably consistent across American cities, despite vast differences in density, layout, and development history.
+
+### Limitations
+
+- **Geographic scope:** All 6 cities are in the United States. The features and class definitions may not transfer to European, Asian, or African cities where urban form, zoning systems, and OSM coverage differ substantially.
+- **OSM coverage bias:** OSM data quality varies by city and neighborhood. Wealthier, more tech-savvy areas tend to have better coverage, potentially introducing a systematic bias that correlates with land use patterns.
+- **Temporal snapshot:** The analysis captures a single point in time. Urban zones are dynamic — a model trained on 2026 data may degrade as cities evolve.
+- **Binary simplification:** Reducing land use to Commercial vs Residential ignores industrial, institutional, and recreational uses. The 3-class experiment showed this simplification comes at a cost.
+- **Building data gaps:** OSM-only cities (especially SF and LA) have near-zero building geometry from Overpass, forcing 4 of 13 features to be imputed as 0. The model works despite this, but accuracy would likely improve with better building data.
+
+### Future Work
+
+1. **Validate transformation detection** by comparing model disagreements against temporal OSM edit logs or Google Street View imagery at different dates.
+2. **Extend to non-US cities** (Barcelona, London, Tokyo) to test whether the features generalize beyond the American urban context.
+3. **Remove `avg_yearbuilt`** from the feature set permanently and retrain — the ablation study shows this alone would boost accuracy by ~6%.
+4. **Add a "confidence" threshold** to predictions: cells where the model is uncertain (probability near 0.5) are flagged as "ambiguous" rather than forced into a class — these are the most likely transformation candidates.
+5. **Integrate satellite imagery features** (NDVI, built-up index) as complementary signals to OSM point-of-interest data.
