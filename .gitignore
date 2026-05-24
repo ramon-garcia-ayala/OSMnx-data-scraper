@@ -29,15 +29,19 @@ Thumbs.db
 *.swp
 *.swo
 
+<<<<<<< HEAD
 # CSV files
 ramy/NYC_pluto_25v4_csv/pluto_25v4.csv
 hcad/harris_county_building_data.csv
+=======
+# Previous workflows — archived, already in git history
+previous_workflows/
+>>>>>>> cc29aa522e8115d721f2c3c165876ab1901fe9d1
 
-# Zone-Finding intermediates
-Zone-Finding/csv/
-Zone-Finding/cache/
-Zone-Finding/outputs/
+# Course assets — PDFs, images, not code
+assets/
 
+<<<<<<< HEAD
 # Grid-Finding — all generated (regenerate via orchestrator)
 Grid-Finding/cache/
 Grid-Finding/csv/
@@ -46,3 +50,15 @@ Grid-Finding/outputs/
 # Houston HCAD — large geospatial data (1GB+ shapefile)
 ahmad/Houston_data/
 harris_county_building_data.csv
+=======
+# Final-Search-ML-Pipeline — generated artifacts
+Final-Search-ML-Pipeline/cache/
+Final-Search-ML-Pipeline/csv/
+Final-Search-ML-Pipeline/outputs/*
+!Final-Search-ML-Pipeline/outputs/*.png
+Final-Search-ML-Pipeline/ml_analysis_output.ipynb
+Final-Search-ML-Pipeline/config.json
+
+# Large datasets (download manually)
+datasets/
+>>>>>>> cc29aa522e8115d721f2c3c165876ab1901fe9d1
