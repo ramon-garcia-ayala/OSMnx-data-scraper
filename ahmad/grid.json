@@ -1,0 +1,39 @@
+{
+    "location": "Houston",
+    "grid_cell_size_m": 150,
+    "min_lots_per_cell": 3,
+    "hcad_path": "hcad/harris_county_building_data.csv",
+    "include_other": false,
+    "csv_dir": "csv/Houston",
+    "feature_flags": {
+        "needs_hcad": true
+    },
+    "zone_type_rules": {
+        "Residential": {
+            "landuse": "01",
+            "threshold": 0.7
+        },
+        "Commercial": {
+            "landuse": "02",
+            "threshold": 0.5
+        },
+        "Industrial": {
+            "landuse": "05",
+            "threshold": 0.3
+        },
+        "Institutional": {
+            "landuse": "08",
+            "threshold": 0.3
+        },
+        "Open Space": {
+            "landuse": [
+                "09",
+                "11"
+            ],
+            "threshold": 0.3
+        },
+        "Mixed-Use": {
+            "description": "No single category dominates"
+        }
+    }
+}

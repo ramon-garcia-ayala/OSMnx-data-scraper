@@ -35,8 +35,21 @@ Thumbs.db
 # Datasets
 datasets/
 
+# CSV files
+ramy/NYC_pluto_25v4_csv/pluto_25v4.csv
+hcad/harris_county_building_data.csv
+
 # Course assets — PDFs, images, not code
 assets/
+
+# Grid-Finding — all generated (regenerate via orchestrator)
+Grid-Finding/cache/
+Grid-Finding/csv/
+Grid-Finding/outputs/
+
+# Houston HCAD — large geospatial data (1GB+ shapefile)
+ahmad/Houston_data/
+harris_county_building_data.csv
 
 # Final-Search-ML-Pipeline — generated artifacts
 Final-Search-ML-Pipeline/cache/
@@ -45,6 +58,3 @@ Final-Search-ML-Pipeline/outputs/*
 !Final-Search-ML-Pipeline/outputs/*.png
 Final-Search-ML-Pipeline/ml_analysis_output.ipynb
 Final-Search-ML-Pipeline/config.json
-
-# Large datasets (download manually)
-datasets/
