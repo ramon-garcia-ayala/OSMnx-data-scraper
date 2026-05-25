@@ -51,6 +51,12 @@ Grid-Finding/outputs/
 ahmad/Houston_data/
 harris_county_building_data.csv
 
+# Ahmad — generated artifacts
+ahmad/cache/
+ahmad/csv/
+ahmad/outputs/
+ahmad/grid.json
+
 # Final-Search-ML-Pipeline — generated artifacts
 Final-Search-ML-Pipeline/cache/
 Final-Search-ML-Pipeline/csv/
