@@ -6,3 +6,6 @@ grid.json
 
 # Large geospatial data
 Houston_data/
+
+# Large datasets
+harris_county_building_data.csv
