@@ -1,8 +1,8 @@
 # Regenerable outputs
-csv/
+# csv/
 cache/
-outputs/*
-!outputs/*.png
+# outputs/*
+# !outputs/*.png
 ml_analysis_output.ipynb
 
 # Runtime config (written by orchestrator)
