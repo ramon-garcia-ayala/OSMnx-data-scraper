@@ -1,0 +1,6 @@
+# Large datasets
+NYC_pluto_25v4_csv/pluto_25v4.csv
+
+# Generated artifacts
+cache/
+csv files/

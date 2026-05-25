@@ -1,0 +1,4 @@
+# Generated artifacts (regenerate via orchestrator)
+cache/
+csv/
+outputs/

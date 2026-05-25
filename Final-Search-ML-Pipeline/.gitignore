@@ -3,6 +3,7 @@ csv/
 cache/
 outputs/*
 !outputs/*.png
+ml_analysis_output.ipynb
 
 # Runtime config (written by orchestrator)
 config.json
