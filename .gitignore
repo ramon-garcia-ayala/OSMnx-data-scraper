@@ -30,7 +30,10 @@ Thumbs.db
 *.swo
 
 # Previous workflows — archived, already in git history
-previous_workflows/
+# previous_workflows/
+
+# Datasets
+datasets/
 
 # Course assets — PDFs, images, not code
 assets/
