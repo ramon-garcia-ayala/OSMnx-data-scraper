@@ -1,0 +1,9 @@
+# Generated artifacts
+cache/
+output/
+
+# Paris pipeline — generated artifacts
+paris-pipeline/csv/
+paris-pipeline/outputs/
+paris-pipeline/executed/
+paris-pipeline/paris.json

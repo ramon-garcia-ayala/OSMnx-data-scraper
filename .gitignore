@@ -1,3 +1,10 @@
+# ============================================================
+# GENERAL .gitignore — DO NOT ADD FOLDER-SPECIFIC RULES HERE
+# Each folder (ahmad/, ramy/, Hani/, ramon/, Grid-Finding/,
+# hcad/, Final-Search-ML-Pipeline/) has its own .gitignore.
+# Add your ignore rules there, not here.
+# ============================================================
+
 # Virtual environment
 encoding/
 etc/
@@ -32,35 +39,11 @@ Thumbs.db
 # Previous workflows — archived, already in git history
 # previous_workflows/
 
-# Datasets
+# Datasets (download manually)
 datasets/
-
-# CSV files
-ramy/NYC_pluto_25v4_csv/pluto_25v4.csv
-hcad/harris_county_building_data.csv
 
 # Course assets — PDFs, images, not code
 assets/
 
-# Grid-Finding — all generated (regenerate via orchestrator)
-Grid-Finding/cache/
-Grid-Finding/csv/
-Grid-Finding/outputs/
-
-# Houston HCAD — large geospatial data (1GB+ shapefile)
-ahmad/Houston_data/
+# Large CSV files at repo root
 harris_county_building_data.csv
-
-# Ahmad — generated artifacts
-ahmad/cache/
-ahmad/csv/
-ahmad/outputs/
-ahmad/grid.json
-
-# Final-Search-ML-Pipeline — generated artifacts
-Final-Search-ML-Pipeline/cache/
-Final-Search-ML-Pipeline/csv/
-Final-Search-ML-Pipeline/outputs/*
-!Final-Search-ML-Pipeline/outputs/*.png
-Final-Search-ML-Pipeline/ml_analysis_output.ipynb
-Final-Search-ML-Pipeline/config.json

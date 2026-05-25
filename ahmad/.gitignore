@@ -1,0 +1,8 @@
+# Generated artifacts (regenerate via orchestrator)
+cache/
+csv/
+outputs/
+grid.json
+
+# Large geospatial data
+Houston_data/
