@@ -1,6 +1,6 @@
 {
     "borough_filter": [
-        "MN"
+        "SI"
     ],
     "borough_codes": {
         "MN": 1,
@@ -11,9 +11,9 @@
     },
     "grid_cell_size_m": 150,
     "min_lots_per_cell": 3,
-    "pluto_path": "E:\\IAAC Local GIT Repositories\\OSMnx-data-scraper\\ramy\\NYC_pluto_25v4_csv\\pluto_25v4.csv",
+    "pluto_path": "E:\\IAAC Local GIT Repositories\\OSMnx-data-scraper\\datasets\\pluto_25v4.csv",
     "include_other": false,
-    "csv_dir": "csv/Manhattan",
+    "csv_dir": "csv/Staten Island",
     "feature_flags": {
         "needs_pluto": true
     },
