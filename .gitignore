@@ -12,6 +12,9 @@ include/
 lib/
 scripts/
 share/
+.venv/
+venv/
+env/
 
 # Python cache
 __pycache__/
