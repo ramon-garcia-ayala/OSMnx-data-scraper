@@ -1,15 +1,17 @@
-"""Build docs/index.html as a TIMELINE map: a year slider (2012 · 2018 · 2026)
-that shows the model's predicted zoning from each year's OSM snapshot, plus a
-Ground-truth / Prediction toggle.
+"""Build docs/index.html: a multi-CITY, multi-LAYER zoning map.
 
-How it works
-------------
-The 150 m NYC grid is identical across years (same PLUTO grid + labels), so the
-cells align 1:1. For each year we load that year's `all_boroughs_combined.csv`,
-scale the 9 features with the exported StandardScaler, and run the exported
-XGBoost classifier -> a predicted class (Commercial / Residential) per cell.
-As OSM coverage grew over the years, the predicted urban character changes — the
-slider animates that. The ground-truth layer is the (constant) PLUTO zone_type.
+City buttons   : NYC · Chicago · Detroit · San Francisco
+Layer slider   : Ground truth + prediction layer(s)
+  - NYC has a year timeline (Ground truth · 2012 · 2018 · 2026) because we have
+    the historical OSM snapshots; each year is the model's prediction on that
+    year's OSM.
+  - Chicago / Detroit / San Francisco have one present-day prediction (the NYC
+    XGBoost model applied zero-shot to that city's OSM features — the project's
+    cross-city transfer design) plus their PLUTO/assessor ground truth.
+
+For the three added cities `avg_floors` is not a real measurement (Chicago has
+none; Detroit/SF carry a constant placeholder), so it is neutralized to the
+scaler mean before prediction.
 
 Run from repo root:  python docs/build_timeline_map.py
 """
@@ -28,22 +30,27 @@ MODEL_DIR = (r"H:\My Drive\03_AIA_TERM\Data Encoding\TEAM_Notebooks\06_Models"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(HERE, "index.html")
 
-# year label -> source folder (all share the identical 150 m grid)
-YEARS = {
-    "2012": "NYC_2012_150m-grid",
-    "2018": "NYC_2018_150m-grid",
-    "2026": "NYC_150m-grid",          # most recent (present-day OSM)
-}
 CELL_SIZE_M = 150
-
-# Feature order is the CSV-native order; confirmed to match scaler.mean_.
 FEATURES = ["amenity_density", "amenity_ratio_food_drink", "shop_density_km2",
             "road_density_primary", "transit_stop_density", "intersection_density",
             "cell_lot_count", "avg_floors", "landuse_entropy"]
 
 PRED_COLORS = {"Commercial": "#B2182B", "Residential": "#2166AC"}
-GT_CLASSES = ["Residential", "Commercial", "Mixed-Use", "Other"]
-GT_COLORS = ["#2166AC", "#B2182B", "#7B3294", "#1B7837"]
+GT_PALETTE = {
+    "Residential": "#2166AC", "Commercial": "#B2182B", "Mixed-Use": "#7B3294",
+    "Industrial": "#F1A340", "Institutional": "#888888", "Open Space": "#1B7837",
+    "Other": "#444444", "Unknown": "#cccccc",
+}
+GT_ORDER = ["Residential", "Commercial", "Mixed-Use", "Industrial",
+            "Institutional", "Open Space", "Other", "Unknown"]
+
+# NYC = multi-year (all_boroughs_combined). Others = single present-day combined_grid.
+NYC_YEARS = {"2012": "NYC_2012_150m-grid", "2018": "NYC_2018_150m-grid", "2026": "NYC_150m-grid"}
+OTHER_CITIES = {
+    "Chicago": "CHI_150m-grid",
+    "Detroit": "DET_150m-grid",
+    "San Francisco": "SF_150m-grid",
+}
 
 
 def load_model():
@@ -52,57 +59,91 @@ def load_model():
     with h5py.File(os.path.join(MODEL_DIR, "scaler.h5")) as f:
         mean, scale = f["mean"][()], f["scale"][()]
     with h5py.File(os.path.join(MODEL_DIR, "encoder.h5")) as f:
-        classes = [c.decode() for c in f["classes"][()]]   # index order of predict()
-    return clf, mean, scale, classes
+        classes = [c.decode() for c in f["classes"][()]]
+    return clf, np.asarray(mean), np.asarray(scale), classes
+
+
+def predict(clf, mean, scale, df, neutralize_floors=False):
+    X = df[FEATURES].astype(float).copy()
+    X["avg_floors"] = X["avg_floors"].fillna(mean[FEATURES.index("avg_floors")])
+    if neutralize_floors:
+        X["avg_floors"] = mean[FEATURES.index("avg_floors")]
+    Xs = (X.values - mean) / scale
+    return [int(v) for v in clf.predict(Xs)]
+
+
+def grid_steps(ref_lat):
+    lat_step = CELL_SIZE_M / 111_000
+    lon_step = CELL_SIZE_M / (111_000 * math.cos(math.radians(ref_lat)))
+    return lat_step, lon_step
+
+
+def city_block(df, gt_col="zone_type"):
+    """Common per-city payload (cells + geometry + gt classes), preds added by caller."""
+    present = [c for c in GT_ORDER if c in set(df[gt_col])]
+    gt_idx = {c: i for i, c in enumerate(present)}
+    ref_lat = float(df["cell_lat"].mean())
+    lat_step, lon_step = grid_steps(ref_lat)
+    half_lat, half_lon = lat_step / 2, lon_step / 2
+    cells = [[round(float(la) - half_lat, 6), round(float(lo) - half_lon, 6),
+              int(gt_idx.get(z, len(present) - 1)), cid]
+             for la, lo, z, cid in zip(df["cell_lat"], df["cell_lon"], df[gt_col], df["cell_id"])]
+    return {
+        "stepLat": round(lat_step, 7), "stepLon": round(lon_step, 7),
+        "center": [round(ref_lat, 5), round(float(df["cell_lon"].mean()), 5)],
+        "bounds": [[round(float(df["cell_lat"].min()) - half_lat, 6),
+                    round(float(df["cell_lon"].min()) - half_lon, 6)],
+                   [round(float(df["cell_lat"].max()) + half_lat, 6),
+                    round(float(df["cell_lon"].max()) + half_lon, 6)]],
+        "gtClasses": present,
+        "cells": cells,
+    }
 
 
 def main():
     clf, mean, scale, pred_classes = load_model()
     pred_colors = [PRED_COLORS[c] for c in pred_classes]
+    by_city = {}
 
-    frames = {y: pd.read_csv(os.path.join(BASE, folder, "all_boroughs_combined.csv"))
-              for y, folder in YEARS.items()}
-    for y, df in frames.items():
+    # --- NYC: timeline (years share one identical grid) -----------------------
+    nyc_frames = {y: pd.read_csv(os.path.join(BASE, f, "all_boroughs_combined.csv"))
+                  for y, f in NYC_YEARS.items()}
+    for y, df in nyc_frames.items():
         df["key"] = df["borough"] + "/" + df["cell_id"]
-
-    # Canonical cell order = the most-recent layer; align all years to it.
-    base_year = "2026"
-    canon = frames[base_year].set_index("key")
+    canon = nyc_frames["2026"].set_index("key")
     keys = list(canon.index)
-    for y, df in frames.items():
-        frames[y] = df.set_index("key").reindex(keys)
-
-    gt_idx = {c: i for i, c in enumerate(GT_CLASSES)}
-    gtcol = canon["zone_type"].map(gt_idx).fillna(len(GT_CLASSES) - 1).astype(int).tolist()
-
+    nyc = city_block(canon.reset_index())
     preds = {}
-    for y in YEARS:
-        X = frames[y][FEATURES].astype(float).values
-        Xs = (X - mean) / scale
-        preds[y] = [int(v) for v in clf.predict(Xs)]   # idx into pred_classes
-        share_com = 100 * np.mean([pred_classes[v] == "Commercial" for v in preds[y]])
-        print(f"  {y}: predicted Commercial {share_com:.1f}% of {len(preds[y])} cells")
+    for y, df in nyc_frames.items():
+        preds[y] = predict(clf, mean, scale, df.set_index("key").reindex(keys))
+        com = 100 * np.mean([pred_classes[v] == "Commercial" for v in preds[y]])
+        print(f"  NYC {y}: Commercial {com:.1f}%")
+    nyc["layers"] = ([{"t": "gt", "label": "Ground truth"}]
+                     + [{"t": "pred", "key": y, "label": y} for y in NYC_YEARS])
+    nyc["preds"] = preds
+    by_city["NYC"] = nyc
 
-    ref_lat = float(canon["cell_lat"].mean())
-    lat_step = CELL_SIZE_M / 111_000
-    lon_step = CELL_SIZE_M / (111_000 * math.cos(math.radians(ref_lat)))
-    half_lat, half_lon = lat_step / 2, lon_step / 2
-
-    cells = [[round(float(la) - half_lat, 6), round(float(lo) - half_lon, 6), g, cid]
-             for la, lo, g, cid in zip(canon["cell_lat"], canon["cell_lon"],
-                                       gtcol, canon["cell_id"])]
+    # --- Chicago / Detroit / San Francisco: GT + one transfer prediction ------
+    for name, folder in OTHER_CITIES.items():
+        df = pd.read_csv(os.path.join(BASE, folder, "combined_grid.csv"))
+        blk = city_block(df)
+        blk["preds"] = {"pred": predict(clf, mean, scale, df, neutralize_floors=True)}
+        blk["layers"] = [{"t": "gt", "label": "Ground truth"},
+                         {"t": "pred", "key": "pred", "label": "Prediction"}]
+        com = 100 * np.mean([pred_classes[v] == "Commercial" for v in blk["preds"]["pred"]])
+        print(f"  {name}: Commercial {com:.1f}% of {len(df)} cells")
+        by_city[name] = blk
 
     data = {
-        "stepLat": round(lat_step, 7), "stepLon": round(lon_step, 7),
-        "center": [round(ref_lat, 5), round(float(canon["cell_lon"].mean()), 5)],
-        "years": list(YEARS.keys()),
+        "cities": ["NYC", "Chicago", "Detroit", "San Francisco"],
         "predClasses": pred_classes, "predColors": pred_colors,
-        "gtClasses": GT_CLASSES, "gtColors": GT_COLORS,
-        "cells": cells, "preds": preds,
+        "gtPalette": GT_PALETTE,
+        "byCity": by_city,
     }
     html = TEMPLATE.replace("__DATA__", json.dumps(data, separators=(",", ":")))
     open(OUT, "w", encoding="utf-8").write(html)
-    print(f"wrote {OUT}: {len(html)/1e6:.2f} MB | {len(cells)} cells | years={list(YEARS)}")
+    total = sum(len(c["cells"]) for c in by_city.values())
+    print(f"wrote {OUT}: {len(html)/1e6:.2f} MB | {total} cells across {len(by_city)} cities")
 
 
 TEMPLATE = """<!DOCTYPE html>
@@ -110,7 +151,7 @@ TEMPLATE = """<!DOCTYPE html>
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>NYC Zoning Timeline — 2012 / 2018 / 2026</title>
+    <title>Urban Zoning — cities &amp; timeline</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
@@ -119,15 +160,15 @@ TEMPLATE = """<!DOCTYPE html>
         .panel { position:fixed; z-index:1000; background:white; padding:10px 12px;
                  border-radius:6px; border:1px solid #888; font-size:13px; line-height:1.5;
                  font-family:Helvetica, Arial, sans-serif; box-shadow:0 1px 6px rgba(0,0,0,.2); }
-        .ctrl { top:10px; right:10px; width:210px; }
-        .ctrl .row { margin-top:8px; }
+        .ctrl { top:10px; right:10px; width:230px; }
+        .ctrl .row { margin:6px 0; display:flex; flex-wrap:wrap; gap:4px; }
         .ctrl button { font:inherit; cursor:pointer; border:1px solid #888; background:#f3f3f3;
-                       padding:5px 11px; border-radius:4px; margin-right:4px; }
+                       padding:4px 9px; border-radius:4px; }
         .ctrl button.active { background:#333; color:#fff; border-color:#333; }
+        .ctrl hr { border:none; border-top:1px solid #ddd; margin:8px 0 4px; }
         .ctrl input[type=range] { width:100%; margin:6px 0 2px; }
         .ticks { display:flex; justify-content:space-between; font-size:11px; color:#444; }
-        .yr { font-size:22px; font-weight:bold; }
-        .muted { color:#999; }
+        .yr { font-size:20px; font-weight:bold; }
         .legend { bottom:30px; left:10px; }
         .loading { top:50%; left:50%; transform:translate(-50%,-50%); }
     </style>
@@ -135,6 +176,9 @@ TEMPLATE = """<!DOCTYPE html>
 <body>
     <div id="map"></div>
     <div class="panel ctrl">
+        <b>City</b>
+        <div class="row" id="cityBtns"></div>
+        <hr>
         <b>Map layer</b>
         <div class="row"><span class="yr" id="layerLabel"></span></div>
         <input type="range" id="slider" min="0" step="1" />
@@ -144,76 +188,100 @@ TEMPLATE = """<!DOCTYPE html>
     <div id="loading" class="panel loading">Loading grid&hellip;</div>
     <script>
         const DATA = __DATA__;
-        const dLat = DATA.stepLat, dLon = DATA.stepLon;
-        const YEARS = DATA.years;
+        let city = DATA.cities[0];
+        let li = 0;
+        let rects = [], group = null;
 
-        // Unified layer slider: Ground truth first, then one stop per year.
-        const LAYERS = [{ t: "gt", label: "Ground truth" }]
-            .concat(YEARS.map(y => ({ t: "pred", year: y, label: y })));
-        let li = LAYERS.length - 1;   // default -> most recent prediction
-        function cur() { return LAYERS[li]; }
-
-        const map = L.map("map", { preferCanvas: true }).setView(DATA.center, 11);
+        const map = L.map("map", { preferCanvas: true }).setView(DATA.byCity[city].center, 11);
         L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
             maxZoom: 20,
             attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
         }).addTo(map);
-
         const renderer = L.canvas({ padding: 0.5 });
+
+        function C() { return DATA.byCity[city]; }
+        function curLayer() { return C().layers[li]; }
+        function gtColors() { return C().gtClasses.map(n => DATA.gtPalette[n] || "#999"); }
         function colorOf(i) {
-            const L = cur();
-            if (L.t === "gt") return DATA.gtColors[DATA.cells[i][2]];
-            return DATA.predColors[DATA.preds[L.year][i]];
+            const L = curLayer(), cell = C().cells[i];
+            if (L.t === "gt") return gtColors()[cell[2]];
+            return DATA.predColors[C().preds[L.key][i]];
         }
         function popupFor(i) {
-            const c = DATA.cells[i];
+            const Cc = C(), cell = Cc.cells[i];
             let rows = "";
-            for (const y of YEARS)
-                rows += "Predicted " + y + ": <b>" + DATA.predClasses[DATA.preds[y][i]] + "</b><br>";
-            return "<b>" + c[3] + "</b><br>Ground truth: " + DATA.gtClasses[c[2]] + "<br>" + rows;
+            for (const L of Cc.layers)
+                if (L.t === "pred")
+                    rows += "Predicted " + L.label + ": <b>" + DATA.predClasses[Cc.preds[L.key][i]] + "</b><br>";
+            return "<b>" + cell[3] + "</b><br>Ground truth: " + Cc.gtClasses[cell[2]] + "<br>" + rows;
         }
 
-        const rects = [];
-        const group = L.featureGroup();
-        for (let i = 0; i < DATA.cells.length; i++) {
-            const c = DATA.cells[i];
-            const rect = L.rectangle(
-                [[c[0], c[1]], [c[0] + dLat, c[1] + dLon]],
-                { renderer: renderer, color: "gray", weight: 0.3,
-                  fill: true, fillColor: colorOf(i), fillOpacity: 0.7 }
-            );
-            rect.bindPopup(((k) => () => popupFor(k))(i), { maxWidth: 240 });
-            rects.push(rect);
-            rect.addTo(group);
+        function buildCity() {
+            if (group) group.remove();
+            rects = []; group = L.featureGroup();
+            const Cc = C(), dLat = Cc.stepLat, dLon = Cc.stepLon;
+            for (let i = 0; i < Cc.cells.length; i++) {
+                const c = Cc.cells[i];
+                const r = L.rectangle([[c[0], c[1]], [c[0] + dLat, c[1] + dLon]],
+                    { renderer: renderer, color: "gray", weight: 0.3,
+                      fill: true, fillColor: colorOf(i), fillOpacity: 0.7 });
+                r.bindPopup(((k) => () => popupFor(k))(i), { maxWidth: 240 });
+                rects.push(r); r.addTo(group);
+            }
+            group.addTo(map);
+            map.fitBounds(Cc.bounds);
         }
-        group.addTo(map);
-
         function recolor() { for (let i = 0; i < rects.length; i++) rects[i].setStyle({ fillColor: colorOf(i) }); }
 
         function renderLegend() {
-            const L = cur();
+            const L = curLayer();
             let title, classes, colors;
-            if (L.t === "gt") { title = "Ground-truth zone (PLUTO)"; classes = DATA.gtClasses; colors = DATA.gtColors; }
-            else { title = "Predicted zone — " + L.year; classes = DATA.predClasses; colors = DATA.predColors; }
+            if (L.t === "gt") { title = city + " — ground truth"; classes = C().gtClasses; colors = gtColors(); }
+            else { title = city + " — predicted (" + L.label + ")"; classes = DATA.predClasses; colors = DATA.predColors; }
             let rows = "";
             for (let i = 0; i < classes.length; i++)
                 rows += '<span style="color:' + colors[i] + ';">&#9632;</span> ' + classes[i] + '<br>';
             document.getElementById("legend").innerHTML = "<b>" + title + "</b><br>" + rows;
         }
-        function refreshLabel() { document.getElementById("layerLabel").textContent = cur().label; }
+        function refreshLabel() { document.getElementById("layerLabel").textContent = curLayer().label; }
 
-        // Slider setup: Ground truth + one stop per year.
         const slider = document.getElementById("slider");
-        slider.max = LAYERS.length - 1;
-        slider.value = li;
-        document.getElementById("ticks").innerHTML =
-            LAYERS.map(L => "<span>" + L.label + "</span>").join("");
+        function setupSlider() {
+            const Cc = C();
+            slider.max = Cc.layers.length - 1;
+            li = Cc.layers.length - 1;          // default -> most recent layer
+            slider.value = li;
+            document.getElementById("ticks").innerHTML =
+                Cc.layers.map(L => "<span>" + L.label + "</span>").join("");
+        }
         slider.addEventListener("input", () => {
             li = parseInt(slider.value, 10);
-            refreshLabel(); recolor(); renderLegend();
+            recolor(); renderLegend(); refreshLabel();
         });
 
-        refreshLabel(); renderLegend();
+        function makeCityButtons() {
+            const wrap = document.getElementById("cityBtns");
+            wrap.innerHTML = "";
+            for (const name of DATA.cities) {
+                const b = document.createElement("button");
+                b.textContent = name;
+                b.className = (name === city) ? "active" : "";
+                b.onclick = () => setCity(name);
+                wrap.appendChild(b);
+            }
+        }
+        function setCity(name) {
+            city = name;
+            makeCityButtons();
+            setupSlider();
+            buildCity();
+            renderLegend(); refreshLabel();
+        }
+
+        makeCityButtons();
+        setupSlider();
+        buildCity();
+        renderLegend(); refreshLabel();
         document.getElementById("loading").remove();
     </script>
 </body>
