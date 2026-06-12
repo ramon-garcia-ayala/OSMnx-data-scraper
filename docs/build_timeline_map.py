@@ -45,7 +45,7 @@ GT_ORDER = ["Residential", "Commercial", "Mixed-Use", "Industrial",
             "Institutional", "Open Space", "Other", "Unknown"]
 
 # NYC = multi-year (all_boroughs_combined). Others = single present-day combined_grid.
-NYC_YEARS = {"2012": "NYC_2012_150m-grid", "2018": "NYC_2018_150m-grid", "2026": "NYC_150m-grid"}
+NYC_YEARS = {"2012": "NYC_2012_150m-grid", "2016": "NYC_2016_150m-grid", "2026": "NYC_150m-grid"}
 OTHER_CITIES = {
     "Chicago": "CHI_150m-grid",
     "Detroit": "DET_150m-grid",
@@ -118,8 +118,9 @@ def main():
         preds[y] = predict(clf, mean, scale, df.set_index("key").reindex(keys))
         com = 100 * np.mean([pred_classes[v] == "Commercial" for v in preds[y]])
         print(f"  NYC {y}: Commercial {com:.1f}%")
-    nyc["layers"] = ([{"t": "gt", "label": "Ground truth"}]
-                     + [{"t": "pred", "key": y, "label": y} for y in NYC_YEARS])
+    # Layer order: 2012 -> 2016 -> 2026 -> Ground truth (GT last).
+    nyc["layers"] = ([{"t": "pred", "key": y, "label": y} for y in NYC_YEARS]
+                     + [{"t": "gt", "label": "Ground truth"}])
     nyc["preds"] = preds
     by_city["NYC"] = nyc
 
@@ -128,8 +129,8 @@ def main():
         df = pd.read_csv(os.path.join(BASE, folder, "combined_grid.csv"))
         blk = city_block(df)
         blk["preds"] = {"pred": predict(clf, mean, scale, df, neutralize_floors=True)}
-        blk["layers"] = [{"t": "gt", "label": "Ground truth"},
-                         {"t": "pred", "key": "pred", "label": "Prediction"}]
+        blk["layers"] = [{"t": "pred", "key": "pred", "label": "Prediction"},
+                         {"t": "gt", "label": "Ground truth"}]
         com = 100 * np.mean([pred_classes[v] == "Commercial" for v in blk["preds"]["pred"]])
         print(f"  {name}: Commercial {com:.1f}% of {len(df)} cells")
         by_city[name] = blk
@@ -249,7 +250,8 @@ TEMPLATE = """<!DOCTYPE html>
         function setupSlider() {
             const Cc = C();
             slider.max = Cc.layers.length - 1;
-            li = Cc.layers.length - 1;          // default -> most recent layer
+            li = 0;                              // default -> most recent prediction
+            for (let k = 0; k < Cc.layers.length; k++) if (Cc.layers[k].t === "pred") li = k;
             slider.value = li;
             document.getElementById("ticks").innerHTML =
                 Cc.layers.map(L => "<span>" + L.label + "</span>").join("");
