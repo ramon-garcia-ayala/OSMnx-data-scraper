@@ -136,15 +136,9 @@ TEMPLATE = """<!DOCTYPE html>
     <div id="map"></div>
     <div class="panel ctrl">
         <b>Map layer</b>
-        <div class="row">
-            <button id="btnPred" class="active" onclick="setMode('pred')">Prediction</button>
-            <button id="btnGt" onclick="setMode('gt')">Ground truth</button>
-        </div>
-        <div class="row" id="timeWrap">
-            <div>Year: <span class="yr" id="yrLabel"></span></div>
-            <input type="range" id="slider" min="0" step="1" />
-            <div class="ticks" id="ticks"></div>
-        </div>
+        <div class="row"><span class="yr" id="layerLabel"></span></div>
+        <input type="range" id="slider" min="0" step="1" />
+        <div class="ticks" id="ticks"></div>
     </div>
     <div class="panel legend" id="legend"></div>
     <div id="loading" class="panel loading">Loading grid&hellip;</div>
@@ -152,8 +146,12 @@ TEMPLATE = """<!DOCTYPE html>
         const DATA = __DATA__;
         const dLat = DATA.stepLat, dLon = DATA.stepLon;
         const YEARS = DATA.years;
-        let mode = "pred";           // "pred" | "gt"
-        let yi = YEARS.length - 1;   // year index -> most recent by default
+
+        // Unified layer slider: Ground truth first, then one stop per year.
+        const LAYERS = [{ t: "gt", label: "Ground truth" }]
+            .concat(YEARS.map(y => ({ t: "pred", year: y, label: y })));
+        let li = LAYERS.length - 1;   // default -> most recent prediction
+        function cur() { return LAYERS[li]; }
 
         const map = L.map("map", { preferCanvas: true }).setView(DATA.center, 11);
         L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
@@ -163,8 +161,9 @@ TEMPLATE = """<!DOCTYPE html>
 
         const renderer = L.canvas({ padding: 0.5 });
         function colorOf(i) {
-            if (mode === "gt") return DATA.gtColors[DATA.cells[i][2]];
-            return DATA.predColors[DATA.preds[YEARS[yi]][i]];
+            const L = cur();
+            if (L.t === "gt") return DATA.gtColors[DATA.cells[i][2]];
+            return DATA.predColors[DATA.preds[L.year][i]];
         }
         function popupFor(i) {
             const c = DATA.cells[i];
@@ -192,39 +191,29 @@ TEMPLATE = """<!DOCTYPE html>
         function recolor() { for (let i = 0; i < rects.length; i++) rects[i].setStyle({ fillColor: colorOf(i) }); }
 
         function renderLegend() {
+            const L = cur();
             let title, classes, colors;
-            if (mode === "gt") { title = "Ground-truth zone (PLUTO)"; classes = DATA.gtClasses; colors = DATA.gtColors; }
-            else { title = "Predicted zone — " + YEARS[yi]; classes = DATA.predClasses; colors = DATA.predColors; }
+            if (L.t === "gt") { title = "Ground-truth zone (PLUTO)"; classes = DATA.gtClasses; colors = DATA.gtColors; }
+            else { title = "Predicted zone — " + L.year; classes = DATA.predClasses; colors = DATA.predColors; }
             let rows = "";
             for (let i = 0; i < classes.length; i++)
                 rows += '<span style="color:' + colors[i] + ';">&#9632;</span> ' + classes[i] + '<br>';
             document.getElementById("legend").innerHTML = "<b>" + title + "</b><br>" + rows;
         }
+        function refreshLabel() { document.getElementById("layerLabel").textContent = cur().label; }
 
-        function refreshTime() {
-            document.getElementById("yrLabel").textContent = YEARS[yi];
-            document.getElementById("timeWrap").style.opacity = (mode === "gt") ? 0.4 : 1;
-            document.getElementById("slider").disabled = (mode === "gt");
-        }
-        function setMode(m) {
-            mode = m;
-            document.getElementById("btnPred").classList.toggle("active", m === "pred");
-            document.getElementById("btnGt").classList.toggle("active", m === "gt");
-            refreshTime(); recolor(); renderLegend();
-        }
-
-        // Slider setup
+        // Slider setup: Ground truth + one stop per year.
         const slider = document.getElementById("slider");
-        slider.max = YEARS.length - 1;
-        slider.value = yi;
-        document.getElementById("ticks").innerHTML = YEARS.map(y => "<span>" + y + "</span>").join("");
+        slider.max = LAYERS.length - 1;
+        slider.value = li;
+        document.getElementById("ticks").innerHTML =
+            LAYERS.map(L => "<span>" + L.label + "</span>").join("");
         slider.addEventListener("input", () => {
-            yi = parseInt(slider.value, 10);
-            if (mode !== "pred") setMode("pred");
-            refreshTime(); recolor(); renderLegend();
+            li = parseInt(slider.value, 10);
+            refreshLabel(); recolor(); renderLegend();
         });
 
-        refreshTime(); renderLegend();
+        refreshLabel(); renderLegend();
         document.getElementById("loading").remove();
     </script>
 </body>
